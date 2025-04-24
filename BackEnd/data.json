@@ -1,0 +1,19 @@
+{
+    "name": "Anand V.",
+    "course": "B.Tech in Computer Science and Business Systems",
+    "interests": [
+        "Cybersecurity",
+        "Networking",
+        "Web Development"
+    ],
+    "projects": [
+        {
+            "name": "NetPath Illuminator",
+            "description": "A tool that visualizes packet flow through network devices."
+        },
+        {
+            "name": "Web Project",
+            "description": "Homepage with full-page background video and animated content."
+        }
+    ]
+}
