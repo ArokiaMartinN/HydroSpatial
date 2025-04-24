@@ -17,7 +17,7 @@ except Exception as e:
     print(f"Error loading dataset: {e}")
     df = pd.DataFrame()  # fallback to an empty DataFrame if loading fails
 
-#genai.configure(api_key="YOUR_API-KEY")
+genai.configure(api_key="YOUR_API-KEY")
 
 def find_districts_in_query(query):
     """
