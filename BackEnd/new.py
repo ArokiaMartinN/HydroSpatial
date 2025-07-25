@@ -18,7 +18,7 @@ except Exception as e:
     df = pd.DataFrame()
 
 # Configure Gemini API (v1)
-genai.configure(api_key="AIzaSyAhzeZhr9QTUHtDUDuvEoOMex13RV9jXDg")
+genai.configure(api_key="API_KEY")
 
 # -------- Helper Functions -------- #
 
