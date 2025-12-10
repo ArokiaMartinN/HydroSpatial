@@ -1,191 +1,169 @@
-import os  
-from flask import Flask, request, jsonify
+import os
 import pandas as pd
-import difflib
 import google.generativeai as genai
+from flask import Flask, request, jsonify
 from flask_cors import CORS
+import re
+from dotenv import load_dotenv
 
+# --- Load environment variables from .env ---
+load_dotenv()
+
+# Flask app setup
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "http://localhost:5173"}})
+CORS(app, resources={r"/*": {"origins": "*"}})
 
-# Load the dataset from a CSV file.
+# ----------------- Load CSV dataset -----------------
 DATA_FILE = "groundWater_2023_2_0.csv"
 try:
     df = pd.read_csv(DATA_FILE)
-    print("Dataset loaded successfully.")
+    print("✅ Dataset loaded successfully.")
 except Exception as e:
-    print(f"Error loading dataset: {e}")
-    df = pd.DataFrame()  # fallback to an empty DataFrame if loading fails
+    print(f"❌ Error loading dataset: {e}")
+    df = pd.DataFrame()
 
-genai.configure(api_key="YOUR_API-KEY")
+# Helper to check if dataset is usable
+REQUIRED_COLUMNS = {"Name of State", "Name of District"}
+
+def dataset_ready():
+    return (not df.empty) and REQUIRED_COLUMNS.issubset(set(df.columns))
+
+if not dataset_ready():
+    print("⚠️ WARNING: Dataset is empty or missing required columns "
+          "('Name of State', 'Name of District'). Dataset-based answers may be limited.")
+
+# ----------------- Configure Gemini AI -----------------
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+if not GEMINI_API_KEY:
+    raise RuntimeError("❌ GEMINI_API_KEY not found. Set it in .env or environment.")
+
+try:
+    genai.configure(api_key=GEMINI_API_KEY)
+    # Use the same model that works in 1.py
+    model = genai.GenerativeModel('gemini-pro-latest')
+    print("✅ Gemini AI configured successfully.")
+except Exception as e:
+    raise RuntimeError(f"🔴 Error configuring Gemini AI: {e}")
+
+# -------- Helper Functions -------- #
 
 def find_districts_in_query(query):
-    """
-    Returns a list of district names that are found in the query by scanning the dataset.
-    """
-    matched_districts = []
-    for district in df["Name of District"].dropna().unique():
-        if district.lower() in query.lower():
-            matched_districts.append(district)
-    print(f"[DEBUG] Matched Districts: {matched_districts}")
-    return matched_districts
+    if not dataset_ready():
+        return []
+    return [
+        district
+        for district in df["Name of District"].dropna().unique()
+        if district.lower() in query.lower()
+    ]
 
 def find_states_in_query(query):
-    """
-    Returns a list of state names that are found in the query by scanning the dataset.
-    """
-    matched_states = []
-    for state in df["Name of State"].dropna().unique():
-        if state.lower() in query.lower():
-            matched_states.append(state)
-    print(f"[DEBUG] Matched States: {matched_states}")
-    return matched_states
+    if not dataset_ready():
+        return []
+    return [
+        state
+        for state in df["Name of State"].dropna().unique()
+        if state.lower() in query.lower()
+    ]
 
 def get_district_data(districts):
-    """
-    Returns detailed data for the given districts, including an aggregate if multiple are found.
-    """
-    district_info = f"Data for districts {', '.join(districts)}:\n"
+    if not dataset_ready():
+        return "Dataset is not ready. Using general groundwater guidance only."
+
+    output = f"📍 Data for districts: {', '.join(districts)}\n"
     df_filtered = df[df["Name of District"].isin(districts)]
+
     for _, row in df_filtered.iterrows():
         parts = []
-        for col in [
-            "Recharge from rainfall During Monsoon Season",
-            "Recharge from other sources During Monsoon Season",
-            "Recharge from rainfall During Non Monsoon Season",
-            "Recharge from other sources During Non Monsoon Season",
-            "Total Annual Ground Water Recharge",
-            "Total Natural Discharges",
-            "Annual Extractable Ground Water Resource",
-            "Current Annual Ground Water Extraction For Irrigation",
-            "Current Annual Ground Water Extraction For Domestic & Industrial Use",
-            "Total Current Annual Ground Water Extraction",
-            "Annual GW Allocation for Domestic Use as on 2025",
-            "Net Ground Water Availability for future use",
-            "Stage of Ground Water Extraction (%)"
-        ]:
-            if col in row:
+        for col in df.columns:
+            if isinstance(row[col], (int, float)):
                 parts.append(f"{col}: {row[col]}")
-        district_info += f"\nDistrict '{row['Name of District']}': " + "; ".join(parts)
-    
+        output += f"\n🔸 District '{row['Name of District']}':\n" + "\n".join(parts)
+
     if len(df_filtered) > 1:
         numeric_cols = df_filtered.select_dtypes(include='number').columns
-        aggregate = df_filtered[numeric_cols].mean().to_dict()
-        agg_info = "\n\nAggregated Averages for the selected districts:\n" + \
-                   "\n".join([f"{k}: {v:.2f}" for k, v in aggregate.items()])
-        district_info += agg_info
-    
-    return district_info
+        average = df_filtered[numeric_cols].mean().to_dict()
+        output += "\n\n📊 Aggregated Averages:\n"
+        output += "\n".join([f"{k}: {v:.2f}" for k, v in average.items()])
+
+    return output
 
 def get_state_data(states):
-    """
-    Returns detailed data for the given states by aggregating data over all districts
-    and providing per-district details.
-    """
-    state_info = ""
+    if not dataset_ready():
+        return "Dataset is not ready. Using general groundwater guidance only."
+
+    output = ""
     for state in states:
         df_state = df[df["Name of State"].str.lower() == state.lower()]
         if df_state.empty:
-            state_info += f"\nNo data found for state '{state}'."
+            output += f"\n❌ No data for state '{state}'."
         else:
-            state_info += f"\nData for state '{state}' (aggregated over all its districts):\n"
+            output += f"\n📍 Data for state '{state}':\n"
             for _, row in df_state.iterrows():
                 parts = []
-                for col in [
-                    "Recharge from rainfall During Monsoon Season",
-                    "Recharge from other sources During Monsoon Season",
-                    "Recharge from rainfall During Non Monsoon Season",
-                    "Recharge from other sources During Non Monsoon Season",
-                    "Total Annual Ground Water Recharge",
-                    "Total Natural Discharges",
-                    "Annual Extractable Ground Water Resource",
-                    "Current Annual Ground Water Extraction For Irrigation",
-                    "Current Annual Ground Water Extraction For Domestic & Industrial Use",
-                    "Total Current Annual Ground Water Extraction",
-                    "Annual GW Allocation for Domestic Use as on 2025",
-                    "Net Ground Water Availability for future use",
-                    "Stage of Ground Water Extraction (%)"
-                ]:
-                    if col in row:
+                for col in df.columns:
+                    if isinstance(row[col], (int, float)):
                         parts.append(f"{col}: {row[col]}")
-                state_info += f"\nDistrict '{row['Name of District']}': " + "; ".join(parts)
-            
+                output += f"\n🔸 District '{row['Name of District']}':\n" + "\n".join(parts)
+
             numeric_cols = df_state.select_dtypes(include='number').columns
-            aggregate = df_state[numeric_cols].mean().to_dict()
-            agg_info = "\n\nAggregated Averages for state data:\n" + \
-                       "\n".join([f"{k}: {v:.2f}" for k, v in aggregate.items()])
-            state_info += agg_info + "\n"
-    
-    return state_info
+            avg = df_state[numeric_cols].mean().to_dict()
+            output += "\n\n📊 State Averages:\n"
+            output += "\n".join([f"{k}: {v:.2f}" for k, v in avg.items()])
+    return output
 
 def search_dataset(query):
-    """
-    Extracts relevant groundwater data for both districts and states detected in the query.
-    Combines all retrieved data into one string.
-    """
-    district_matches = find_districts_in_query(query)
-    state_matches = find_states_in_query(query)
-    
-    dataset_info_parts = []
-    
-    if district_matches:
-        district_info = get_district_data(district_matches)
-        dataset_info_parts.append(district_info)
-    
-    if state_matches:
-        state_info = get_state_data(state_matches)
-        dataset_info_parts.append(state_info)
-    
-    if not dataset_info_parts:
-        dataset_info = "No specific district or state was identified in the query."
-    else:
-        dataset_info = "\n".join(dataset_info_parts)
-    
-    print(f"[DEBUG] Combined dataset info:\n{dataset_info}")
-    return dataset_info
+    if not dataset_ready():
+        # This line will be visible to the model in the prompt
+        return "Dataset not loaded or missing required columns. Use only general groundwater knowledge."
+
+    districts = find_districts_in_query(query)
+    states = find_states_in_query(query)
+
+    results = []
+    if districts:
+        results.append(get_district_data(districts))
+    if states:
+        results.append(get_state_data(states))
+
+    return "\n".join(results) if results else "No relevant districts or states found in query."
 
 def get_gemini_response(prompt):
-    """
-    Calls the Gemini API to generate a response based on the prompt.
-    """
     try:
-        model = genai.GenerativeModel("gemini-1.5-pro")
         response = model.generate_content(prompt)
         return response.text.strip()
     except Exception as e:
-        return f"Error contacting Gemini API: {e}"
+        print(f"❌ Error contacting Gemini API: {e}")
+        return f"❌ Error contacting Gemini API: {e}"
+
+# -------- API Endpoints -------- #
+
 @app.route('/api/states', methods=['GET'])
 def get_states():
-    if df.empty:
+    if not dataset_ready():
         return jsonify([]), 500
-    # Extract unique states from the dataset
-    states = sorted(df["Name of State"].dropna().unique().tolist())
-    return jsonify(states)
+    return jsonify(sorted(df["Name of State"].dropna().unique().tolist()))
 
 @app.route('/api/districts', methods=['GET'])
 def get_districts():
-    if df.empty:
+    if not dataset_ready():
         return jsonify([]), 500
     state = request.args.get('state')
     if state:
-        districts = sorted(
-            df[df["Name of State"].str.lower() == state.lower()]["Name of District"]
-            .dropna()
-            .unique()
-            .tolist()
-        )
+        filtered = df[df["Name of State"].str.lower() == state.lower()]
+        districts = sorted(filtered["Name of District"].dropna().unique().tolist())
     else:
         districts = sorted(df["Name of District"].dropna().unique().tolist())
     return jsonify(districts)
 
 @app.route('/api/data', methods=['GET'])
 def get_data():
-    if df.empty:
-        return jsonify({"error": "Dataset not loaded"}), 500
+    if not dataset_ready():
+        return jsonify({"error": "Dataset not loaded or missing required columns"}), 500
 
     state = request.args.get('state')
     district = request.args.get('district')
-    field = request.args.get('field')  # e.g. "rainfall"
+    field = request.args.get('field')
 
     filtered_df = df.copy()
     if state:
@@ -196,24 +174,15 @@ def get_data():
     if filtered_df.empty:
         return jsonify({"error": "No data found for given filters"}), 404
 
-    # If a specific field is requested (e.g., "rainfall"), compute its average.
-    # (This example assumes the CSV contains either a "Mean Rainfall" column or a "Rainfall" column.)
     if field and field.lower() == "rainfall":
-        if "Mean Rainfall" in filtered_df.columns:
-            avg_value = filtered_df["Mean Rainfall"].mean()
-        elif "Rainfall" in filtered_df.columns:
-            avg_value = filtered_df["Rainfall"].mean()
-        else:
+        col = "Mean Rainfall" if "Mean Rainfall" in filtered_df.columns else "Rainfall"
+        if col not in filtered_df.columns:
             return jsonify({"error": "Rainfall data not available"}), 400
-        data = {"average_rainfall": round(avg_value, 2)}
-    else:
-        # Otherwise, return aggregated values for all numeric columns.
-        numeric_cols = filtered_df.select_dtypes(include='number').columns
-        aggregates = filtered_df[numeric_cols].mean().to_dict()
-        # Round off the values for cleaner output.
-        data = {k: round(v, 2) for k, v in aggregates.items()}
+        return jsonify({"average_rainfall": round(filtered_df[col].mean(), 2)})
 
-    return jsonify(data)
+    numeric_cols = filtered_df.select_dtypes(include='number').columns
+    return jsonify({k: round(v, 2) for k, v in filtered_df[numeric_cols].mean().to_dict().items()})
+
 @app.route('/query', methods=['POST'])
 def query():
     data = request.get_json()
@@ -221,18 +190,87 @@ def query():
     if not user_query:
         return jsonify({"error": "No query provided."}), 400
 
-    # Retrieve dataset information for all keywords (districts and states) in the query.
     dataset_info = search_dataset(user_query)
-    
-    # Build prompt that includes both the dataset details and the original query.
-    prompt = (
-        f"User Query: {user_query}\n"
-        f"Dataset Information: {dataset_info}\n"
-        "Based on the above, provide a clear, detailed, and natural answer related to groundwater data.***give many numerical values from the dataset ***"
-    )
-    
-    gemini_response = get_gemini_response(prompt)
-    return jsonify({"answer": gemini_response})
 
+    prompt = f"""
+You are HydroSpatial AI, a helpful and friendly assistant for groundwater and water resources.
+Your tone is professional, simple, and very clear. Your goal is to provide highly structured, step-by-step answers in HTML.
+
+--- DATASET CONTEXT ---
+{dataset_info}
+--- END DATASET CONTEXT ---
+
+--- USER QUERY ---
+{user_query}
+--- END USER QUERY ---
+
+--- HOW TO USE DATASET ---
+- First, try to use the dataset context to answer the question.
+- If the dataset context says something like "Dataset not loaded or missing required columns" or
+  "No relevant districts or states found in query.", then:
+  - Do NOT give fake location-specific numbers.
+  - Mention clearly that you are giving general guidance.
+- You may also use your general knowledge about groundwater, rainfall, water stress, desalination, etc.
+
+--- FORMATTING RULES (CRITICAL) ---
+- Output only HTML tags, no Markdown, no backticks.
+- Do NOT include <!DOCTYPE html>, <html>, or <body> tags.
+- The response must be a clean HTML fragment that can go inside a <div>.
+- Use:
+  - <h2> for the main title (with an emoji).
+  - <h3> for subheadings (sections).
+  - <p> for short paragraphs.
+  - <b> for bold key terms.
+  - <i> for small emphasis if needed.
+  - <ul> + <li> for bullet lists.
+  - <ol> + <li> for step-by-step lists.
+  - Emojis to make it friendly (e.g., 💧, 🌍, 📊, ✅, ⚠️, 💡).
+
+--- REQUIRED STRUCTURE (VERY IMPORTANT) ---
+1. Start with a clear main heading:
+   <h2>💧 Main Topic Title</h2>
+
+2. Then a 2–3 sentence summary:
+   <p>Short and simple summary of what this is about.</p>
+
+3. Then a step-by-step section:
+   <h3>🧭 Step-by-Step Approach</h3>
+   <ol>
+     <li><b>Step 1 – ...:</b> 2–4 sentences of detailed, practical explanation.</li>
+     <li><b>Step 2 – ...:</b> 2–4 sentences of detailed, practical explanation.</li>
+     <li><b>Step 3 – ...:</b> 2–4 sentences of detailed, practical explanation.</li>
+     <li><b>Step 4 – ...:</b> 2–4 sentences of detailed, practical explanation.</li>
+   </ol>
+
+4. Then a key points / checklist section:
+   <h3>📌 Key Technical Points</h3>
+   <ul>
+     <li><b>Point 1:</b> Clear explanation.</li>
+     <li><b>Point 2:</b> Clear explanation.</li>
+     <li><b>Point 3:</b> Clear explanation.</li>
+   </ul>
+
+5. Then how to apply this in practice:
+   <h3>🔧 How to Apply This in the Field</h3>
+   <ol>
+     <li>Concrete action 1 the user can do.</li>
+     <li>Concrete action 2 the user can do.</li>
+     <li>Concrete action 3 the user can do.</li>
+   </ol>
+
+6. Optional extra insights:
+   <h3>🔍 Extra Insights</h3>
+   <p>Any extra tips, caveats, or common mistakes.</p>
+
+--- STYLE ---
+- Be very step-by-step.
+- Every step and bullet must be clear, concrete, and practical.
+- Use simple language and explain any technical term in plain words.
+"""
+
+    response = get_gemini_response(prompt)
+    return jsonify({"answer": response})
+
+# -------- Run Flask Server -------- #
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=True)

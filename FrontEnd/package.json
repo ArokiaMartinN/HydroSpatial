@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "node ./node_modules/vite/bin/vite.js",
-    "build": "vite build",
+    "build": "node ./node_modules/vite/bin/vite.js build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
@@ -14,13 +14,16 @@
     "@tabler/icons-react": "^3.31.0",
     "clsx": "^2.1.1",
     "framer-motion": "^11.18.2",
+    "html-react-parser": "^5.2.10",
     "lucide-react": "^0.344.0",
     "motion": "^12.5.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-markdown": "^10.1.0",
     "react-router-dom": "^6.22.3",
-    "react-select": "^5.10.1",
-    "recharts": "^2.15.1",
+    "react-select": "^5.10.2",
+    "recharts": "^2.15.4",
+    "remark-gfm": "^4.0.1",
     "tailwind-merge": "^3.0.2"
   },
   "devDependencies": {

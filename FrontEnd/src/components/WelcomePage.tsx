@@ -1,88 +1,67 @@
-import React, { useState, useEffect } from 'react';
-import { motion, useScroll, useTransform } from 'framer-motion';
-import { DropletIcon, MapPin, BarChart as ChartBar, Database, ArrowDown } from 'lucide-react';
+import React from 'react';
+import { motion } from 'framer-motion';
+import { DropletIcon, MapPin, BarChart as ChartBar, Database, ArrowRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { ThemeContext } from '../App';
 
 const WelcomePage: React.FC = () => {
   const navigate = useNavigate();
-  const { scrollYProgress } = useScroll();
-  const opacity = useTransform(scrollYProgress, [0, 0.9], [1, 0]);
-  const scale = useTransform(scrollYProgress, [0, 1], [1, 0.8]);
-  const [shouldNavigate, setShouldNavigate] = useState(false);
+  const { themeColors } = React.useContext(ThemeContext);
 
-  useEffect(() => {
-    const unsubscribe = scrollYProgress.onChange(v => {
-      if (v >= 0.9 && !shouldNavigate) {
-        setShouldNavigate(true);
-        setTimeout(() => navigate('/dashboard'), 500);
-      }
-    });
-
-    return () => unsubscribe();
-  }, [scrollYProgress, navigate, shouldNavigate]);
+  const FeatureCard = ({ icon, title, text }: { icon: React.ReactNode, title: string, text: string }) => (
+    <div className={`${themeColors.contentBg} p-6 md:p-8 rounded-xl shadow-lg border ${themeColors.border} transition-colors duration-500`}>
+      <div className="text-blue-500 mb-4">{icon}</div>
+      <h3 className={`text-lg md:text-xl font-semibold ${themeColors.textPrimary} mb-2`}>{title}</h3>
+      <p className={`text-sm md:text-base ${themeColors.textSecondary}`}>{text}</p>
+    </div>
+  );
 
   return (
-    <div className="min-h-[200vh] bg-white">
-      <motion.div
-        style={{ opacity, scale }}
-        className="fixed inset-0 flex flex-col items-center justify-center bg-white"
-      >
-        <div className="text-center max-w-4xl mx-auto px-4">
-          <motion.div
-            initial={{ y: -50, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ duration: 0.8 }}
-            className="mb-8"
+    <div className={`min-h-screen ${themeColors.bg} flex items-center justify-center transition-colors duration-500`}>
+      <div className="text-center max-w-5xl mx-auto px-4 py-12 md:py-16">
+        <motion.div
+          initial={{ y: -30, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ duration: 0.8, ease: "easeOut" }}
+          className="mb-10 md:mb-12"
+        >
+          <div className="flex flex-col md:flex-row items-center justify-center mb-6">
+            <DropletIcon className="h-16 w-16 md:h-24 md:w-24 text-blue-500 mb-4 md:mb-0" />
+            <div className="md:ml-4 text-center md:text-left">
+              {/* Responsive Text Sizes */}
+              <h1 className={`text-4xl md:text-7xl font-bold ${themeColors.textPrimary}`}>HydroSpatial</h1>
+              <p className="text-lg md:text-3xl text-blue-500 mt-2">India's Water Resource Analytics</p>
+            </div>
+          </div>
+          <p className={`text-base md:text-lg ${themeColors.textSecondary} max-w-3xl mx-auto leading-relaxed`}>
+            Discover comprehensive insights into India's water resources through advanced analytics and real-time visualization.
+          </p>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.3, duration: 0.8 }}
+          className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8 mb-12"
+        >
+          <FeatureCard icon={<ChartBar size={40} />} title="Real-time Analytics" text="Interactive dashboards with live data visualization and trend analysis." />
+          <FeatureCard icon={<MapPin size={40} />} title="Geographic Mapping" text="Detailed state and district-level water resource mapping." />
+          <FeatureCard icon={<Database size={40} />} title="Data Intelligence" text="Advanced metrics and predictive analysis for water management." />
+        </motion.div>
+
+        <motion.div
+          initial={{ y: 30, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ delay: 0.6, duration: 0.8 }}
+        >
+          <button
+            onClick={() => navigate('/dashboard')}
+            className="w-full md:w-auto bg-blue-600 text-white font-bold py-4 px-8 rounded-full shadow-lg hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-500/50 transition-all duration-300 transform hover:scale-105 flex items-center justify-center mx-auto"
           >
-            <div className="flex items-center justify-center mb-6">
-              <DropletIcon className="h-24 w-24 text-blue-600" />
-              <div className="ml-4 text-left">
-                <h1 className="text-7xl font-bold text-blue-900">HydroSpatial</h1>
-                <p className="text-3xl text-blue-600">India's Water Resource Analytics</p>
-              </div>
-            </div>
-            <p className="text-xl text-gray-600 max-w-2xl mx-auto">
-              Discover comprehensive insights into India's water resources through advanced analytics 
-              and real-time visualization.
-            </p>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 50 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3, duration: 0.8 }}
-            className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-16"
-          >
-            <div className="bg-blue-50 p-8 rounded-xl shadow-lg">
-              <ChartBar className="h-12 w-12 text-blue-600 mb-4" />
-              <h3 className="text-xl font-semibold text-blue-900 mb-2">Real-time Analytics</h3>
-              <p className="text-gray-600">Interactive dashboards with live data visualization and trend analysis.</p>
-            </div>
-
-            <div className="bg-blue-50 p-8 rounded-xl shadow-lg">
-              <MapPin className="h-12 w-12 text-blue-600 mb-4" />
-              <h3 className="text-xl font-semibold text-blue-900 mb-2">Geographic Mapping</h3>
-              <p className="text-gray-600">Detailed state and district-level water resource mapping.</p>
-            </div>
-
-            <div className="bg-blue-50 p-8 rounded-xl shadow-lg">
-              <Database className="h-12 w-12 text-blue-600 mb-4" />
-              <h3 className="text-xl font-semibold text-blue-900 mb-2">Data Intelligence</h3>
-              <p className="text-gray-600">Advanced metrics and predictive analysis for water management.</p>
-            </div>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.6 }}
-            className="text-center text-gray-500 animate-bounce"
-          >
-            <p className="mb-2">Scroll down to explore</p>
-            <ArrowDown className="mx-auto h-6 w-6" />
-          </motion.div>
-        </div>
-      </motion.div>
+            Enter Dashboard <ArrowRight className="ml-3" />
+          </button>
+        </motion.div>
+      </div>
     </div>
   );
 };
