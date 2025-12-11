@@ -1,355 +1,115 @@
-/**
- * AIAssistant.tsx
- * Super UI: attachments, drag/drop, previews, search (debounced + highlight + jump),
- * command palette, improved visuals, keyboard shortcuts, accessible controls.
- *
- * Requirements:
- * - React + TypeScript
- * - Tailwind CSS
- * - framer-motion, lucide-react, html-react-parser
- *
- * Notes:
- * - Attachment previews use URL.createObjectURL (local preview). For persistent hosting, replace with server upload.
- * - Search is substring-based; switch to fuse.js for fuzzy search if desired.
- */
-
 import React, { useEffect, useMemo, useRef, useState, useContext } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import parse from "html-react-parser";
 import {
-  Bot, Send, Plus, Trash2, Copy, Loader2,
+  Bot, Send, Plus, Trash2, Copy,
   MessageSquare, MoreHorizontal, Sparkles, Menu, X,
-  Zap, History, Smile, Paperclip, CornerDownLeft, Search
+  Zap, BarChart3, FileText, Settings, ChevronRight
 } from "lucide-react";
-import { ThemeContext } from "../App";
+import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
+import { ThemeContext } from "../App"; 
 
-/* ------------------------- THEME ------------------------- */
+/* ------------------------- UTILS ------------------------- */
+function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+
+// IMPROVED MARKDOWN PARSER
+// Handles the specific "* Observation:" format with better spacing
+const parseMarkdown = (text: string) => {
+  let formatted = text
+    // 1. Handle " * Key:" patterns by adding a line break and bolding
+    // Added <br/> before the strong tag to ensure it starts on a new line visually
+    .replace(/\* (.*?):/g, '<br/><br/><strong class="text-blue-600 dark:text-blue-400">$1:</strong>')
+    // 2. Handle bullet points (single * at start of line)
+    .replace(/(?:\r\n|\r|\n)\s*\*\s+/g, '<br/>• ')
+    // 3. Bold text (**text**)
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    // 4. Code blocks
+    .replace(/```([\s\S]*?)```/g, '<div class="bg-black/5 dark:bg-black/30 p-3 rounded-lg my-2 border border-black/5 font-mono text-xs overflow-x-auto"><code>$1</code></div>')
+    // 5. Inline code
+    .replace(/`([^`]+)`/g, '<code class="bg-slate-200 dark:bg-slate-700 px-1.5 py-0.5 rounded font-mono text-xs">$1</code>')
+    // 6. Basic Line breaks
+    .replace(/\n/g, '<br/>');
+
+  return formatted;
+};
+
+/* ------------------------- THEME CONFIG ------------------------- */
 const themeConfig = {
   light: {
-    bg: "bg-gradient-to-b from-[#fbfdff] to-[#f1f7fb]",
-    sidebar: "bg-white/70 backdrop-blur-xl border-r border-slate-200/60 shadow-md",
+    bg: "bg-[#F9FAFB]",
+    sidebar: "bg-white border-r border-slate-200",
     textMain: "text-slate-800",
     textMuted: "text-slate-500",
-    accentSolid: "bg-blue-600",
-    accentHover: "hover:brightness-95",
-    botMsg: "bg-white/90 text-slate-800",
-    userMsg: "bg-gradient-to-br from-blue-600 to-cyan-500 text-white shadow-lg",
-    inputBg: "bg-white/95 border border-slate-100 shadow-lg",
-    card: "bg-white border border-slate-100 shadow-sm hover:shadow-md",
+    botBubble: "bg-white border border-slate-200 shadow-sm text-slate-800",
+    userBubble: "bg-blue-600 text-white shadow-md",
+    inputWrapper: "bg-white shadow-[0_8px_30px_rgb(0,0,0,0.08)] border border-slate-100",
+    card: "bg-white border border-slate-200 shadow-sm hover:shadow-md hover:border-blue-400 transition-all cursor-pointer",
+    highlight: "bg-slate-100 text-slate-900 font-medium",
   },
   dark: {
-    bg: "bg-gradient-to-b from-[#071018] to-[#0f1117]",
-    sidebar: "bg-[#0a0f14]/70 backdrop-blur-xl border-r border-white/5 shadow-lg",
-    textMain: "text-slate-100",
+    bg: "bg-[#0B0F15]",
+    sidebar: "bg-[#0f141c] border-r border-white/5",
+    textMain: "text-slate-200",
     textMuted: "text-slate-400",
-    accentSolid: "bg-blue-600",
-    accentHover: "hover:brightness-110",
-    botMsg: "bg-[#0f1724]/80 text-slate-200",
-    userMsg: "bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-2xl",
-    inputBg: "bg-[#0f1724] shadow-2xl border border-white/5",
-    card: "bg-[#0f1724] border border-white/5 hover:border-blue-500/30",
+    botBubble: "bg-[#161b26] border border-white/5 text-slate-200",
+    userBubble: "bg-blue-600 text-white shadow-lg shadow-blue-900/20",
+    inputWrapper: "bg-[#161b26] shadow-2xl border border-white/10",
+    card: "bg-[#161b26] border border-white/5 hover:border-white/20 transition-all cursor-pointer",
+    highlight: "bg-white/10 text-white font-medium",
   },
 };
 
-type Attachment = {
-  id: string;
-  name: string;
-  size: number;
-  type: string;
-  url: string; // objectURL or uploaded URL
-};
-
-type Message = {
-  id: string;
-  text: string;
-  isBot: boolean;
-  timestamp: number;
-  attachments?: Attachment[];
-};
-
-type Conversation = {
-  id: string;
-  title: string;
-  messages: Message[];
-  lastModified: number;
-};
-
-const MAX_FILE_SIZE = 12 * 1024 * 1024; // 12 MB
-
-/* ------------------------- HELPERS ------------------------ */
-const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const escapeHtml = (s: string) =>
-  s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-
-const highlightText = (text: string, query: string) => {
-  if (!query) return escapeHtml(text);
-  try {
-    const safeQuery = escapeRegExp(query);
-    const re = new RegExp(`(${safeQuery})`, "ig");
-    const escaped = escapeHtml(text);
-    return escaped.replace(re, '<mark class="bg-yellow-300/30 rounded px-1">$1</mark>');
-  } catch {
-    return escapeHtml(text);
-  }
-};
-
-const formatTime = (ts: number) => {
-  const d = new Date(ts);
-  return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
-};
-
-/* ------------------------- API (fallback-safe) ------------- */
-const getBotResponse = async (userMessage: string, history: Message[]): Promise<string> => {
-  try {
-    const resp = await fetch("http://127.0.0.1:5000/query", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query: userMessage, history }),
-    });
-    if (!resp.ok) throw new Error("Network");
-    const data = await resp.json();
-    if (typeof data.answer === "string") return data.answer;
-    if (typeof data === "string") return data;
-    return JSON.stringify(data);
-  } catch {
-    return `<p><strong>Offline</strong>: couldn't contact the API. Simulated reply for <em>${escapeHtml(userMessage)}</em></p>`;
-  }
-};
-
-/* ------------------------- SUB-COMPONENTS ------------------ */
-const SidebarItem: React.FC<{
-  active: boolean;
-  title: string;
-  onClick: () => void;
-  onDelete: () => void;
-  theme: any;
-}> = ({ active, title, onClick, onDelete, theme }) => (
-  <div
-    onClick={onClick}
-    className={`group flex items-center gap-3 px-3 py-3 mx-2 rounded-xl cursor-pointer transition-all duration-200
-      ${active ? "bg-gradient-to-r from-blue-50 to-white text-blue-600 shadow-inner" : `${theme.textMain} hover:bg-slate-100/70`}`}
-  >
-    <MessageSquare size={16} className={active ? "opacity-100" : "opacity-60"} />
-    <span className="flex-1 truncate text-sm font-medium">{title}</span>
-    <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-      <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="p-1.5 hover:bg-red-100 rounded-md text-red-500">
-        <Trash2 size={12} />
-      </button>
-    </div>
-  </div>
-);
+/* ------------------------- TYPES ------------------------- */
+type Attachment = { id: string; name: string; size: number; type: string; url: string; };
+type Message = { id: string; text: string; isBot: boolean; timestamp: number; attachments?: Attachment[]; isStreaming?: boolean; };
+type Conversation = { id: string; title: string; messages: Message[]; lastModified: number; };
 
 /* ------------------------- MAIN COMPONENT ----------------- */
 const AIAssistant: React.FC = () => {
-  const { theme: globalTheme } = useContext(ThemeContext);
+  const { theme: globalTheme } = useContext(ThemeContext); 
   const t = globalTheme === "dark" ? themeConfig.dark : themeConfig.light;
 
   const [conversations, setConversations] = useState<Conversation[]>(() => {
-    try {
-      const s = localStorage.getItem("hydro-chat-history");
-      return s ? JSON.parse(s) : [];
-    } catch {
-      return [];
-    }
+    try { return JSON.parse(localStorage.getItem("hydro-chat-history") || "[]"); } catch { return []; }
   });
+  
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [isSidebarOpen, setSidebarOpen] = useState(true);
-
-  // search
-  const [sidebarFilter, setSidebarFilter] = useState("");
-  const [globalSearchInput, setGlobalSearchInput] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [paletteOpen, setPaletteOpen] = useState(false);
-
-  // attachments pending
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
-  const fileRef = useRef<HTMLInputElement | null>(null);
-
+  
+ 
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
-  const dropRef = useRef<HTMLDivElement | null>(null);
 
-  // message refs for scrolling to a match
-  const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  useEffect(() => { localStorage.setItem("hydro-chat-history", JSON.stringify(conversations)); }, [conversations]);
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [conversations, isTyping, activeConversationId]);
 
-  useEffect(() => {
-    try { localStorage.setItem("hydro-chat-history", JSON.stringify(conversations)); } catch {}
-  }, [conversations]);
+  /* --- ACTIONS --- */
 
-  // debounce search
-  useEffect(() => {
-    const id = setTimeout(() => setDebouncedSearch(globalSearchInput.trim()), 300);
-    return () => clearTimeout(id);
-  }, [globalSearchInput]);
-
-  // auto-resize input
-  useEffect(() => {
-    if (inputRef.current) {
-      inputRef.current.style.height = "auto";
-      inputRef.current.style.height = Math.min(inputRef.current.scrollHeight, 220) + "px";
-    }
-  }, [input]);
-
-  // keyboard shortcuts
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        setPaletteOpen((p) => !p);
-      }
-      if (e.key === "Escape") {
-        setPaletteOpen(false);
-        setGlobalSearchInput("");
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, []);
-
-  // drag/drop attachment support
-  useEffect(() => {
-    const el = dropRef.current;
-    if (!el) return;
-    const onDragOver = (e: DragEvent) => {
-      e.preventDefault();
-      el.classList.add("ring-2", "ring-blue-400/60");
-    };
-    const onDragLeave = (e: DragEvent) => {
-      e.preventDefault();
-      el.classList.remove("ring-2", "ring-blue-400/60");
-    };
-    const onDrop = (e: DragEvent) => {
-      e.preventDefault();
-      el.classList.remove("ring-2", "ring-blue-400/60");
-      if (e.dataTransfer?.files) handleFiles(e.dataTransfer.files);
-    };
-    el.addEventListener("dragover", onDragOver);
-    el.addEventListener("dragleave", onDragLeave);
-    el.addEventListener("drop", onDrop);
-    return () => {
-      el.removeEventListener("dragover", onDragOver);
-      el.removeEventListener("dragleave", onDragLeave);
-      el.removeEventListener("drop", onDrop);
-    };
-  }, []);
-
-  // filtered sidebar conversations
-  const filteredConversations = useMemo(() => {
-    const q = sidebarFilter.trim().toLowerCase();
-    if (!q) return conversations;
-    return conversations.filter(
-      (c) =>
-        c.title.toLowerCase().includes(q) ||
-        c.messages.some((m) => m.text.toLowerCase().includes(q))
-    );
-  }, [conversations, sidebarFilter]);
-
-  // search results for global search
-  const searchResults = useMemo(() => {
-    const q = debouncedSearch;
-    if (!q) return [];
-    const out: {
-      convoId: string;
-      convoTitle: string;
-      titleMatches: number;
-      messageMatches: number;
-      sampleMessageId?: string;
-      sampleSnippet?: string;
-    }[] = [];
-
-    const qLower = q.toLowerCase();
-
-    for (const c of conversations) {
-      let titleMatches = c.title.toLowerCase().includes(qLower) ? 1 : 0;
-      let messageMatches = 0;
-      let sampleMessageId: string | undefined;
-      let sampleSnippet: string | undefined;
-
-      for (const m of c.messages) {
-        if (m.text.toLowerCase().includes(qLower)) {
-          messageMatches++;
-          if (!sampleMessageId) {
-            sampleMessageId = m.id;
-            const txt = m.text.replace(/\n+/g, " ");
-            const idx = txt.toLowerCase().indexOf(qLower);
-            const start = Math.max(0, idx - 30);
-            const end = Math.min(txt.length, idx + qLower.length + 30);
-            sampleSnippet = (start > 0 ? "…" : "") + txt.slice(start, end) + (end < txt.length ? "…" : "");
-          }
-        }
-      }
-
-      if (titleMatches || messageMatches) {
-        out.push({ convoId: c.id, convoTitle: c.title, titleMatches, messageMatches, sampleMessageId, sampleSnippet });
-      }
-    }
-
-    out.sort((a, b) => {
-      const cm = (b.messageMatches - a.messageMatches) || (b.titleMatches - a.titleMatches);
-      if (cm !== 0) return cm;
-      const ca = conversations.find((x) => x.id === a.convoId);
-      const cb = conversations.find((x) => x.id === b.convoId);
-      return (cb?.lastModified || 0) - (ca?.lastModified || 0);
-    });
-
-    return out;
-  }, [conversations, debouncedSearch]);
-
-  // register message ref (for scrolling)
-  const registerMessageRef = (messageId: string, el: HTMLDivElement | null) => {
-    if (el) messageRefs.current[messageId] = el;
-    else delete messageRefs.current[messageId];
+  // FORCE RESET TO WELCOME SCREEN
+  const goHome = () => {
+    setActiveConversationId(null);
+    if (window.innerWidth < 1024) setSidebarOpen(false);
+    setTimeout(() => inputRef.current?.focus(), 100);
   };
 
-  // file handling
-  const handleFiles = (files: FileList | null) => {
-    if (!files) return;
-    const next: Attachment[] = [];
-    for (const f of Array.from(files)) {
-      if (f.size > MAX_FILE_SIZE) {
-        alert(`${f.name} is larger than ${(MAX_FILE_SIZE / 1024 / 1024).toFixed(1)} MB and was skipped.`);
-        continue;
-      }
-      const id = `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const url = URL.createObjectURL(f);
-      next.push({ id, name: f.name, size: f.size, type: f.type, url });
-    }
-    if (next.length > 0) setPendingAttachments((p) => [...p, ...next]);
-  };
-
-  const onAttachClick = () => {
-    if (!fileRef.current) return;
-    fileRef.current.value = "";
-    fileRef.current.click();
-  };
-  const onFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => handleFiles(e.target.files);
-
-  const removePendingAttachment = (id: string) => {
-    setPendingAttachments((p) => {
-      const remove = p.find((x) => x.id === id);
-      try { if (remove) URL.revokeObjectURL(remove.url); } catch {}
-      return p.filter((x) => x.id !== id);
-    });
-  };
-
-  // send message (includes pending attachments)
   const handleSend = async (msg = input) => {
     if (!msg.trim() && pendingAttachments.length === 0) return;
-    if (isTyping) return;
-
-    let convoId = activeConversationId;
-    if (!convoId) {
-      convoId = Date.now().toString();
-      const conv: Conversation = { id: convoId, title: msg.slice(0, 60) || "New Analysis", messages: [], lastModified: Date.now() };
-      setConversations((p) => [conv, ...p]);
-      setActiveConversationId(convoId);
+    
+    let currentId = activeConversationId;
+    
+    // Create new chat session only on first message
+    if (!currentId) {
+        const newId = Date.now().toString();
+        const newConv = { id: newId, title: msg.slice(0, 40) || "New Analysis", messages: [], lastModified: Date.now() };
+        setConversations(prev => [newConv, ...prev]);
+        setActiveConversationId(newId);
+        currentId = newId;
     }
 
     const userMsg: Message = {
@@ -357,319 +117,277 @@ const AIAssistant: React.FC = () => {
       text: msg,
       isBot: false,
       timestamp: Date.now(),
-      attachments: pendingAttachments.map((a) => ({ ...a })), // attach local previews
+      attachments: [...pendingAttachments]
     };
 
-    setConversations((p) => p.map((c) => (c.id === convoId ? { ...c, messages: [...c.messages, userMsg], lastModified: Date.now() } : c)));
+    setConversations(prev => prev.map(c => 
+      c.id === currentId 
+      ? { ...c, messages: [...c.messages, userMsg], lastModified: Date.now(), title: c.messages.length === 0 ? msg.slice(0, 30) : c.title } 
+      : c
+    ));
+
     setInput("");
     setPendingAttachments([]);
     setIsTyping(true);
 
-    // Note: if you want server uploads, perform them here and update message attachments with server URLs
-
-    const botText = await getBotResponse(msg, []);
-    const botMsg: Message = { id: `b-${Date.now()}`, text: botText, isBot: true, timestamp: Date.now() };
-    setConversations((p) => p.map((c) => (c.id === convoId ? { ...c, messages: [...c.messages, botMsg], lastModified: Date.now() } : c)));
-    setIsTyping(false);
-    setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 80);
-  };
-
-  const newChat = () => {
-    setActiveConversationId(null);
-    if (window.innerWidth < 1024) setSidebarOpen(false);
-    setTimeout(() => inputRef.current?.focus(), 120);
-  };
-
-  const openSearchResult = (convoId: string, messageId?: string) => {
-    setActiveConversationId(convoId);
-    setSidebarOpen(true);
+    // Simulated Response
     setTimeout(() => {
-      if (messageId) {
-        const el = messageRefs.current[messageId];
-        if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
-      } else {
-        chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-      }
-    }, 160);
+      const responseText = "Detailed Analysis:\n\n* Observation: The dataset indicates that recharge from rainfall and other sources During Non Monsoon Season (12823.54) is significantly higher than During Monsoon Season (1718.77).\n\n* Anomaly Detected: This appears to be an anomaly, as typically monsoon season contributes more to overall recharge.";
+      
+      const botMsg: Message = {
+        id: `b-${Date.now()}`,
+        text: responseText,
+        isBot: true,
+        timestamp: Date.now(),
+        isStreaming: true
+      };
+
+      setConversations(prev => prev.map(c => c.id === currentId ? { ...c, messages: [...c.messages, botMsg] } : c));
+      setIsTyping(false);
+    }, 1500);
   };
 
-  const copyToClipboard = async (text: string) => {
-    try { await navigator.clipboard.writeText(text); } catch {}
-  };
-
-  const activeMessages = useMemo(() => conversations.find((c) => c.id === activeConversationId)?.messages || [], [conversations, activeConversationId]);
+  const activeMessages = useMemo(() => conversations.find(c => c.id === activeConversationId)?.messages || [], [conversations, activeConversationId]);
 
   /* ------------------------- RENDER ------------------------- */
   return (
-    <div className={`flex h-[calc(100dvh-4rem)] overflow-hidden ${t.bg} font-sans text-sm`}>
-      {/* Sidebar */}
+    <div className={cn("flex h-screen w-full overflow-hidden font-sans transition-colors duration-300 relative", t.bg)}>
+      
+      {/* ---------------- SIDEBAR ---------------- */}
       <AnimatePresence>
         {isSidebarOpen && (
-          <motion.aside initial={{ x: -320, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: -320, opacity: 0 }} transition={{ type: "spring", stiffness: 260, damping: 30 }} className={`${t.sidebar} z-40 w-[320px] flex flex-col`}>
-            <div className="px-5 h-16 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-600 to-cyan-500 flex items-center justify-center shadow-lg text-white"><Bot size={18} /></div>
-              <div>
-                <div className={`font-bold text-lg ${t.textMain}`}>HydroAI</div>
-                <div className="text-xs text-slate-400">Hydrology workspace</div>
+          <motion.aside 
+            initial={{ x: -280, opacity: 0 }} 
+            animate={{ x: 0, opacity: 1 }} 
+            exit={{ x: -280, opacity: 0 }}
+            transition={{ type: "spring", stiffness: 300, damping: 30 }}
+            className={cn("h-full flex-shrink-0 flex flex-col z-50 shadow-xl lg:shadow-none w-[280px] absolute lg:relative", t.sidebar)}
+          >
+            <div className="p-4 flex flex-col gap-4 h-full">
+              {/* Header */}
+              <div className="flex items-center justify-between px-2 mb-2">
+                 <div onClick={goHome} className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity">
+                    <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white shadow-lg shadow-blue-600/20">
+                        <Bot size={18} />
+                    </div>
+                    <div className="flex flex-col">
+                      <span className={cn("font-bold text-sm tracking-tight", t.textMain)}>HydroSpatial</span>
+                      <span className="text-[10px] text-slate-400 font-medium tracking-wide">AI WORKSPACE</span>
+                    </div>
+                 </div>
+                 <button onClick={() => setSidebarOpen(false)} className="lg:hidden text-slate-400"><X size={18}/></button>
               </div>
-              <button className="ml-auto lg:hidden text-slate-400" onClick={() => setSidebarOpen(false)}><X /></button>
-            </div>
 
-            <div className="px-4">
-              <button onClick={newChat} className={`w-full rounded-2xl py-3 px-4 flex items-center gap-3 ${t.inputBg} transition`}>
-                <Plus size={18} className="text-slate-800" />
-                <span className="font-semibold">New Analysis</span>
+              {/* New Chat Button */}
+              <button 
+                onClick={goHome}
+                className={cn("flex items-center gap-3 px-3 py-3 rounded-lg border transition-all group shadow-sm text-sm font-medium", 
+                  globalTheme === 'dark' ? "bg-white/5 border-white/5 hover:bg-white/10" : "bg-white border-slate-200 hover:border-blue-400 text-slate-700")}
+              >
+                <Plus size={16} className="text-blue-500" />
+                New Analysis
               </button>
-            </div>
 
-            {/* quick filter */}
-            <div className="px-4 mt-3">
-              <div className="flex items-center gap-2 p-2 rounded-xl bg-white/50 dark:bg-white/3">
-                <Search size={16} />
-                <input value={sidebarFilter} onChange={(e) => setSidebarFilter(e.target.value)} placeholder="Filter history" className="flex-1 bg-transparent outline-none" />
-                <button onClick={() => setSidebarFilter("")}><X size={14} /></button>
+              <div className="text-[11px] font-bold text-slate-400 px-2 mt-4 uppercase tracking-wider opacity-60">Recent Analysis</div>
+              
+              {/* History List */}
+              <div className="flex-1 overflow-y-auto custom-scrollbar space-y-1 pr-1">
+                {conversations.length === 0 && <div className="text-xs text-slate-500 px-2 italic mt-2">No history found.</div>}
+                {conversations.map(c => (
+                  <div 
+                    key={c.id} 
+                    onClick={() => { setActiveConversationId(c.id); if(window.innerWidth < 1024) setSidebarOpen(false); }}
+                    className={cn(
+                      "group relative px-3 py-2.5 rounded-md cursor-pointer text-sm truncate transition-all flex items-center gap-3",
+                      activeConversationId === c.id ? t.highlight : `${t.textMuted} hover:bg-black/5 dark:hover:bg-white/5`
+                    )}
+                  >
+                    <MessageSquare size={14} className={activeConversationId === c.id ? "text-blue-500" : "opacity-70"} />
+                    <span className="truncate flex-1">{c.title}</span>
+                    <button 
+                        onClick={(e) => { e.stopPropagation(); setConversations(p => p.filter(x => x.id !== c.id)); }}
+                        className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-500 transition-opacity"
+                    >
+                        <Trash2 size={12} />
+                    </button>
+                  </div>
+                ))}
               </div>
-            </div>
 
-            <div className="px-4 mt-4 text-xs font-bold uppercase opacity-50">History</div>
-
-            <div className="flex-1 overflow-y-auto px-2 py-2">
-              {filteredConversations.length === 0 ? (
-                <div className="px-4 py-6 text-center text-slate-500">No conversations yet</div>
-              ) : (
-                filteredConversations.map((c) => (
-                  <SidebarItem key={c.id} theme={t} title={c.title} active={activeConversationId === c.id} onClick={() => { setActiveConversationId(c.id); if (window.innerWidth < 1024) setSidebarOpen(false); }} onDelete={() => setConversations((p) => p.filter((x) => x.id !== c.id))} />
-                ))
-              )}
-            </div>
-
-            <div className="px-4 py-4 border-t border-white/5">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-full bg-gradient-to-r from-indigo-500 to-purple-500 flex items-center justify-center text-white font-bold text-xs">JS</div>
-                <div className="flex-1 min-w-0">
-                  <div className={`${t.textMain} font-medium truncate`}>Jane Scientist</div>
-                  <div className="text-xs text-slate-400 truncate">Pro Plan • Manage</div>
-                </div>
-                <MoreHorizontal className="text-slate-400" />
+              {/* CLEAN FOOTER - NO USER PROFILE, JUST SETTINGS */}
+              <div className="mt-auto border-t border-dashed border-slate-500/20 pt-4">
+                 <button className={cn("flex items-center gap-3 px-3 py-2 w-full rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors text-left", t.textMuted)}>
+                    <Settings size={16} />
+                    <span className="text-xs font-medium">Settings</span>
+                 </button>
               </div>
             </div>
           </motion.aside>
         )}
       </AnimatePresence>
 
-      {/* overlay for mobile */}
-      {isSidebarOpen && <div className="fixed inset-0 bg-black/50 z-30 lg:hidden" onClick={() => setSidebarOpen(false)} />}
+      {/* Mobile Overlay */}
+      {isSidebarOpen && <div className="fixed inset-0 bg-black/60 z-40 lg:hidden backdrop-blur-sm" onClick={() => setSidebarOpen(false)} />}
 
-      {/* Main */}
-      <main className="flex-1 flex flex-col relative">
-        <header className="h-16 flex items-center justify-between px-4 lg:px-8">
-          <div className="flex items-center gap-3">
-            {!isSidebarOpen && <button onClick={() => setSidebarOpen(true)} className="p-2 rounded-lg"><Menu /></button>}
-            <h2 className={`${t.textMain} font-medium`}>{activeConversationId ? "Analysis Session" : "Overview"}</h2>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <div className="relative">
-              <input value={globalSearchInput} onChange={(e) => setGlobalSearchInput(e.target.value)} placeholder="Search messages & titles (global)" className="rounded-lg px-3 py-2 w-72 bg-white/90 dark:bg-[#0f1724] outline-none" />
-              {debouncedSearch && <div className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-500">{searchResults.length} results</div>}
-            </div>
-
-            <div className="hidden md:block text-xs text-slate-400">Tip: press <kbd className="px-1 bg-white/10 rounded">⌘/Ctrl</kbd> + <kbd className="px-1 bg-white/10 rounded">K</kbd></div>
-            <button className="p-2 rounded-lg text-slate-400"><MoreHorizontal /></button>
-          </div>
-        </header>
-
-        {/* search results dropdown */}
-        <AnimatePresence>
-          {debouncedSearch && (
-            <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} className="absolute left-1/2 -translate-x-1/2 top-16 z-40 w-[min(980px,94%)]">
-              <div className="bg-white/95 dark:bg-[#071018]/90 backdrop-blur rounded-xl shadow-xl border border-white/10 p-3 max-h-60 overflow-auto">
-                {searchResults.length === 0 ? (
-                  <div className="text-sm text-slate-500 p-2">No results for “{debouncedSearch}”</div>
-                ) : (
-                  searchResults.map((r) => (
-                    <div key={r.convoId} className="p-2 hover:bg-black/5 rounded cursor-pointer flex gap-3 items-start" onClick={() => openSearchResult(r.convoId, r.sampleMessageId)}>
-                      <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-100 to-cyan-50 flex items-center justify-center text-blue-600">
-                        <MessageSquare />
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <div className="text-sm font-medium truncate">{parse(highlightText(r.convoTitle, debouncedSearch))}</div>
-                          <div className="ml-auto text-xs text-slate-400">{r.messageMatches} messages</div>
-                        </div>
-                        <div className="text-xs text-slate-500 mt-1">{r.sampleSnippet ? parse(highlightText(r.sampleSnippet, debouncedSearch)) : ""}</div>
-                      </div>
-                    </div>
-                  ))
+      {/* ---------------- MAIN CONTENT ---------------- */}
+      <main className="flex-1 flex flex-col h-full relative z-0">
+        
+        {/* Header - Only shows when chat is active to keep Welcome screen clean */}
+        <div className="h-14 flex-shrink-0 flex items-center justify-between px-6 border-b border-transparent z-10">
+            <div className="flex items-center gap-3">
+                {!isSidebarOpen && (
+                    <button onClick={() => setSidebarOpen(true)} className={cn("p-2 rounded-md hover:bg-black/5 transition-colors", t.textMain)}>
+                        <Menu size={20}/>
+                    </button>
                 )}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Chat area (drop target) */}
-        <div ref={dropRef} className="flex-1 overflow-y-auto px-4 lg:px-8 pb-36 pt-4">
-          {!activeConversationId ? (
-            <div className="max-w-4xl mx-auto h-full flex flex-col items-center justify-center -mt-10">
-              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-8 px-4">
-                <div className="w-24 h-24 mx-auto bg-gradient-to-tr from-blue-500 to-cyan-400 rounded-3xl shadow-2xl flex items-center justify-center mb-4">
-                  <Sparkles size={42} className="text-white" />
-                </div>
-                <h1 className="text-3xl lg:text-4xl font-bold mb-2 text-white">Welcome back, Jane</h1>
-                <p className="text-lg max-w-xl mx-auto text-slate-300">Ask HydroAI to analyze hydrological data, simulate scenarios, or generate a report.</p>
-              </motion.div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 w-full max-w-3xl">
-                <div className={`${t.card} p-4 rounded-2xl`}>
-                  <h3 className="font-semibold">Trend Analysis</h3>
-                  <p className="text-sm text-slate-500 mt-2">Analyze groundwater over time</p>
-                  <button onClick={() => handleSend("Analyze groundwater levels in District 4")} className="mt-3 px-3 py-2 rounded bg-blue-600 text-white">Run</button>
-                </div>
-                <div className={`${t.card} p-4 rounded-2xl`}>
-                  <h3 className="font-semibold">Historical Report</h3>
-                  <p className="text-sm text-slate-500 mt-2">Compare current rainfall vs 2010</p>
-                  <button onClick={() => handleSend("Compare current rainfall vs 2010 benchmarks")} className="mt-3 px-3 py-2 rounded bg-blue-600 text-white">Run</button>
-                </div>
-                <div className={`${t.card} p-4 rounded-2xl`}>
-                  <h3 className="font-semibold">Forecast</h3>
-                  <p className="text-sm text-slate-500 mt-2">Forecast reservoir capacity for next summer</p>
-                  <button onClick={() => handleSend("Forecast reservoir capacity for next summer")} className="mt-3 px-3 py-2 rounded bg-blue-600 text-white">Run</button>
-                </div>
-              </div>
+                {activeConversationId && (
+                   <div className="flex items-center gap-2 animate-in fade-in slide-in-from-left-2 duration-300">
+                      <span className={cn("font-medium text-sm", t.textMain)}>Analysis Session</span>
+                      <ChevronRight size={14} className="text-slate-400" />
+                   </div>
+                )}
             </div>
-          ) : (
-            <div className="max-w-3xl mx-auto space-y-6">
-              {activeMessages.map((msg) => (
-                <motion.div key={msg.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className={`flex gap-4 ${msg.isBot ? "" : "flex-row-reverse"} group`}>
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center mt-1 ${msg.isBot ? "bg-gradient-to-br from-teal-500 to-blue-600 text-white" : "bg-slate-200 text-slate-800"}`}>
-                    {msg.isBot ? <Bot /> : <div className="text-xs font-bold">YOU</div>}
-                  </div>
+        </div>
 
-                  <div className="relative max-w-[85%] lg:max-w-[75%]">
-                    <div ref={(el) => registerMessageRef(msg.id, el)} className={`${msg.isBot ? t.botMsg : t.userMsg} rounded-2xl px-4 py-3 shadow-sm`}>
-                      <div className="prose prose-sm max-w-none break-words text-sm">
-                        {debouncedSearch ? parse(highlightText(msg.text, debouncedSearch)) : parse(msg.text)}
-                      </div>
-
-                      {/* attachments */}
-                      {msg.attachments && msg.attachments.length > 0 && (
-                        <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          {msg.attachments.map((att) => (
-                            <div key={att.id} className="border rounded p-2 bg-white/60">
-                              {att.type.startsWith("image/") ? (
-                                <img src={att.url} alt={att.name} className="w-full object-contain rounded max-h-44" />
-                              ) : (
-                                <div className="flex items-center justify-between gap-2">
-                                  <div className="flex-1">
-                                    <div className="font-medium text-sm truncate">{att.name}</div>
-                                    <div className="text-xs text-slate-500">{(att.size / 1024).toFixed(0)} KB</div>
-                                  </div>
-                                  <a className="ml-3 px-2 py-1 bg-blue-600 text-white rounded text-xs" href={att.url} download={att.name}>Download</a>
-                                </div>
-                              )}
-                            </div>
-                          ))}
+        {/* SCROLLABLE AREA 
+            pb-56 (14rem) guarantees text is visible "below the bar"
+        */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar px-4 lg:px-0 pb-56">
+            {!activeConversationId ? (
+                /* WELCOME SCREEN - FORCE CENTERED */
+                <div className="h-full flex flex-col items-center justify-center p-4">
+                    <motion.div 
+                        initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }}
+                        className="text-center w-full max-w-2xl mx-auto mb-12"
+                    >
+                        <div className="w-16 h-16 mx-auto bg-gradient-to-tr from-blue-600 to-cyan-500 rounded-2xl shadow-xl shadow-blue-500/20 flex items-center justify-center mb-6">
+                           <Sparkles size={32} className="text-white" />
                         </div>
-                      )}
+                        <h2 className={cn("text-3xl font-bold mb-3 tracking-tight", t.textMain)}>HydroSpatial AI</h2>
+                        <p className={cn("text-base max-w-lg mx-auto leading-relaxed", t.textMuted)}>
+                            Advanced hydrological data analysis.
+                        </p>
+                    </motion.div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-5 w-full max-w-5xl mx-auto px-4">
+                        {[
+                            { icon: Zap, label: "Trend Analysis", desc: "Analyze groundwater levels" },
+                            { icon: BarChart3, label: "Comparison", desc: "Compare rainfall vs 2010" },
+                            { icon: FileText, label: "Report Generation", desc: "Summarize monthly data" },
+                        ].map((item, idx) => (
+                            <motion.button 
+                                key={idx}
+                                initial={{ opacity: 0, scale: 0.95 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                transition={{ delay: idx * 0.1 }}
+                                onClick={() => handleSend(item.desc)}
+                                className={cn("p-5 rounded-2xl text-left flex flex-col gap-3 group transition-all duration-300", t.card)}
+                            >
+                                <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center", globalTheme === 'dark' ? "bg-blue-500/10 text-blue-400" : "bg-blue-50 text-blue-600")}>
+                                    <item.icon size={18} />
+                                </div>
+                                <div>
+                                    <div className={cn("font-semibold text-sm mb-1", t.textMain)}>{item.label}</div>
+                                    <div className="text-xs text-slate-400 leading-snug">{item.desc}</div>
+                                </div>
+                            </motion.button>
+                        ))}
                     </div>
+                </div>
+            ) : (
+                /* CHAT HISTORY */
+                <div className="max-w-3xl mx-auto py-8 space-y-8 px-4">
+                    {activeMessages.map((msg) => (
+                        <motion.div 
+                            key={msg.id}
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className={cn("flex gap-5", msg.isBot ? "justify-start" : "justify-end")}
+                        >
+                            {msg.isBot && (
+                                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-600 to-cyan-500 flex items-center justify-center flex-shrink-0 mt-1 shadow-md">
+                                    <Bot size={16} className="text-white" />
+                                </div>
+                            )}
 
-                    <div className="flex gap-2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity items-center text-xs">
-                      <button onClick={() => copyToClipboard(msg.text)} className="p-1 rounded-md hover:bg-black/5" title="Copy"><Copy size={14} /></button>
-                      <button className="p-1 rounded-md hover:bg-black/5" title="Reply"><CornerDownLeft size={14} /></button>
-                      <button className="p-1 rounded-md hover:bg-black/5" title="React"><Smile size={14} /></button>
-                      <span className="text-[11px] text-slate-400 ml-auto">{formatTime(msg.timestamp)}</span>
-                    </div>
-                  </div>
-                </motion.div>
-              ))}
-
-              {isTyping && (
-                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex gap-4 items-center">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-teal-500 to-blue-600 flex items-center justify-center text-white">
-                    <Loader2 className="animate-spin" />
-                  </div>
-                  <div className="text-sm text-slate-400">HydroAI is thinking...</div>
-                </motion.div>
-              )}
-
-              <div ref={chatEndRef} className="h-6" />
-            </div>
-          )}
-        </div>
-
-        {/* Floating composer */}
-        <div className="absolute bottom-6 left-0 right-0 px-4 flex justify-center z-30">
-          <div className={`${t.inputBg} w-full max-w-3xl rounded-2xl p-3`}>
-            {/* pending attachment chips */}
-            {pendingAttachments.length > 0 && (
-              <div className="mb-2 flex gap-2 flex-wrap">
-                {pendingAttachments.map((att) => (
-                  <div key={att.id} className="flex items-center gap-2 bg-white/70 px-3 py-1 rounded-full">
-                    <div className="text-xs font-medium truncate max-w-[200px]">{att.name}</div>
-                    <div className="text-xs text-slate-500">{(att.size / 1024).toFixed(0)} KB</div>
-                    <button onClick={() => removePendingAttachment(att.id)} className="p-1"><X size={14} /></button>
-                  </div>
-                ))}
-              </div>
+                            <div className={cn("flex flex-col max-w-[85%]", msg.isBot ? "items-start" : "items-end")}>
+                                <div className={cn("text-xs font-semibold mb-2 opacity-70", t.textMain)}>
+                                    {msg.isBot ? "HydroAI" : "You"}
+                                </div>
+                                
+                                <div className={cn("px-6 py-4 text-[15px] leading-relaxed shadow-sm rounded-2xl", 
+                                    msg.isBot ? `${t.botBubble} rounded-tl-none` : `${t.userBubble} rounded-tr-none`
+                                )}>
+                                    <div className="markdown-body">
+                                        {parse(parseMarkdown(msg.text))}
+                                    </div>
+                                </div>
+                                
+                                {msg.isBot && (
+                                    <div className="flex items-center gap-3 mt-2 px-1">
+                                        <button className="text-xs text-slate-400 hover:text-blue-500 flex items-center gap-1"><Copy size={12}/> Copy</button>
+                                        <button className="text-xs text-slate-400 hover:text-blue-500 flex items-center gap-1"><MoreHorizontal size={12}/></button>
+                                    </div>
+                                )}
+                            </div>
+                        </motion.div>
+                    ))}
+                    {isTyping && (
+                         <div className="flex gap-5">
+                            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-600 to-cyan-500 flex items-center justify-center flex-shrink-0 mt-1">
+                                <Bot size={16} className="text-white" />
+                            </div>
+                            <div className={cn("px-4 py-3 rounded-2xl rounded-tl-none flex items-center gap-1", t.botBubble)}>
+                                <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" />
+                                <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce delay-75" />
+                                <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce delay-150" />
+                            </div>
+                         </div>
+                    )}
+                    <div ref={chatEndRef} />
+                </div>
             )}
-
-            <div className="flex items-start gap-3">
-              <textarea ref={inputRef} value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }} placeholder="Ask HydroAI anything... (Shift+Enter for newline)" rows={1} className="flex-1 bg-transparent outline-none resize-none px-2 py-2 text-sm" />
-
-              <div className="flex flex-col gap-2">
-                <div className="flex gap-2">
-                  <button title="Attach" onClick={onAttachClick} className="p-2 rounded-xl hover:bg-black/5"><Paperclip /></button>
-                  <button title="Emoji" className="p-2 rounded-xl hover:bg-black/5"><Smile /></button>
-                </div>
-
-                <div>
-                  <button onClick={() => handleSend()} disabled={!input.trim() && pendingAttachments.length === 0} className={`px-4 py-2 rounded-xl ${(!input.trim() && pendingAttachments.length === 0) ? "bg-slate-200 text-slate-400" : "bg-blue-600 text-white"}`}>
-                    {isTyping ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Send />}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex justify-between items-center px-2 mt-2 text-xs text-slate-400">
-              <div className="flex items-center gap-4">
-                <span className="flex items-center gap-1"><Paperclip size={12} /> Attach</span>
-                <span className="flex items-center gap-1"><Smile size={12} /> Emoji</span>
-              </div>
-              <div className="text-[11px] opacity-60">Press <kbd className="px-1 bg-white/10 rounded">Enter</kbd> to send</div>
-            </div>
-
-            {/* hidden file input */}
-            <input ref={fileRef} type="file" hidden multiple onChange={onFileInputChange} />
-          </div>
         </div>
 
-        <div className={`absolute bottom-1 w-full text-center text-[10px] ${t.textMuted} opacity-60`}>HydroAI generated content may be inaccurate. Verify important information.</div>
+        {/* INPUT AREA - Pinned to bottom with safety spacing */}
+        <div className="absolute bottom-6 left-0 right-0 px-4 flex justify-center z-20 pointer-events-none">
+            <div className="w-full max-w-3xl pointer-events-auto">
+                <div className={cn("rounded-2xl p-2 pl-4 flex items-end gap-3 transition-all duration-300", t.inputWrapper)}>
+                    <textarea 
+                        ref={inputRef} 
+                        value={input} 
+                        onChange={(e) => setInput(e.target.value)} 
+                        onKeyDown={(e) => { if(e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }} 
+                        placeholder="Ask HydroSpatial AI about your data..." 
+                        className={cn("flex-1 max-h-32 py-3 bg-transparent outline-none resize-none text-[15px]", t.textMain)} 
+                        rows={1} 
+                    />
+                    <button 
+                        onClick={() => handleSend()} 
+                        disabled={!input.trim()} 
+                        className={cn("mb-1 p-2.5 rounded-xl transition-all duration-200 flex items-center justify-center", 
+                        input.trim() ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20 hover:scale-105" : "bg-slate-200 dark:bg-slate-800 text-slate-400")}
+                    >
+                        <Send size={18} className={input.trim() ? "ml-0.5" : ""} />
+                    </button>
+                </div>
+                <div className="text-center mt-3 text-[11px] text-slate-400 opacity-70">
+                    HydroSpatial AI can make mistakes. Please verify important information.
+                </div>
+            </div>
+        </div>
       </main>
 
-      {/* Command Palette */}
-      <AnimatePresence>
-        {paletteOpen && (
-          <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.98 }} transition={{ duration: 0.12 }} className="fixed inset-0 z-50 flex items-start justify-center pt-24 pointer-events-none">
-            <div className="pointer-events-auto w-[min(720px,92%)] bg-white/90 dark:bg-[#071018]/80 backdrop-blur-md rounded-xl shadow-2xl border border-white/10">
-              <div className="p-3">
-                <input autoFocus value={globalSearchInput} onChange={(e) => setGlobalSearchInput(e.target.value)} placeholder="Search commands, actions, or history..." className="w-full bg-transparent outline-none text-lg px-2 py-2" />
-                <div className="max-h-56 overflow-y-auto mt-2">
-                  <button onClick={() => { handleSend("Analyze groundwater levels in District 4"); setPaletteOpen(false); }} className="w-full text-left px-3 py-2 rounded hover:bg-black/5 flex items-center gap-3"><Zap /><div><div className="font-medium">Trend Analysis</div><div className="text-xs text-slate-400">Analyze groundwater levels</div></div></button>
-                  <button onClick={() => { handleSend("Compare current rainfall vs 2010 benchmarks"); setPaletteOpen(false); }} className="w-full text-left px-3 py-2 rounded hover:bg-black/5 flex items-center gap-3"><History /><div><div className="font-medium">Historical Report</div><div className="text-xs text-slate-400">Compare benchmarks</div></div></button>
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* styles */}
       <style>{`
-        .prose img { max-width: 100%; height: auto; }
-        mark { background: rgba(250,204,21,0.25); padding: 0 2px; border-radius: 4px; }
-        .custom-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: ${globalTheme === "light" ? "#cbd5e1" : "#24303a"}; border-radius: 20px; }
-        kbd { background: rgba(255,255,255,0.04); padding: 2px 6px; border-radius: 6px; }
+        /* Professional Markdown Styles */
+        .markdown-body strong { font-weight: 600; }
+        .markdown-body ul { list-style-type: disc; padding-left: 20px; margin: 10px 0; }
+        .markdown-body li { margin-bottom: 4px; }
+        
+        .custom-scrollbar::-webkit-scrollbar { width: 5px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(156, 163, 175, 0.3); border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(156, 163, 175, 0.5); }
       `}</style>
     </div>
   );
