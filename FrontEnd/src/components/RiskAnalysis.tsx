@@ -381,7 +381,7 @@ const RiskAnalysis = () => {
                           />
                           <Bar dataKey="value" radius={[4, 4, 0, 0]}>
                             {
-                              [0, 1, 2].map((entry, index) => (
+                              [0, 1, 2].map((index) => (
                                 <Cell key={`cell-${index}`} fill={['#10B981', '#F59E0B', '#3B82F6'][index]} />
                               ))
                             }

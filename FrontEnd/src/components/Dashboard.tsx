@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import  { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Droplets, Activity, AlertTriangle, MapPin, 
@@ -41,7 +41,7 @@ const Dashboard = () => {
       console.warn("Warning: Your API is HTTP. This might fail on Vercel/Netlify.");
     }
 
-    fetch('http://13.201.99.219:5000/api/states')
+    fetch('http://localhost:5000/api/states')
       .then((res) => res.json())
       .then((data) => setStates(data.map((s: string) => ({ value: s, label: s }))))
       .catch((err) => {
@@ -51,24 +51,28 @@ const Dashboard = () => {
   }, []);
 
   useEffect(() => {
-    if (selectedState) {
-      setLoading(true);
-      fetch(`http://13.201.99.219:5000/api/districts?state=${selectedState.value}`)
-        .then((res) => res.json())
-        .then((data) => {
-          setDistricts(data.map((d: string) => ({ value: d, label: d })));
-          setSelectedDistrict(null);
-        })
-        .finally(() => setLoading(false));
-    }
-  }, [selectedState]);
+  if (selectedState) {
+    setLoading(true);
+    fetch(`http://localhost:5000/api/districts?state=${encodeURIComponent(selectedState.value)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        setDistricts(data.map((d: string) => ({ value: d, label: d })));
+        setSelectedDistrict(null);
+      })
+      .catch((err) => {
+        console.error(err);
+        setError("Failed to load districts. Check API connection.");
+      })
+      .finally(() => setLoading(false));
+  }
+}, [selectedState]);
 
   const handleAnalyze = () => {
     if (!selectedState || !selectedDistrict) return;
     setLoading(true);
     setError(null);
     
-    fetch(`http://13.201.99.219:5000/api/data?state=${selectedState.value}&district=${selectedDistrict.value}`)
+    fetch(`http://localhost:5000/api/data?state=${selectedState.value}&district=${selectedDistrict.value}`)
       .then((res) => res.json())
       .then((fetchedData) => {
         // 1. Format Main Data
@@ -301,7 +305,7 @@ const Dashboard = () => {
                           <ResponsiveContainer width="100%" height="100%">
                             <RadialBarChart innerRadius="70%" outerRadius="100%" data={[{ value: waterScore, fill: '#3B82F6' }]} startAngle={180} endAngle={0} barSize={20}>
                               <PolarAngleAxis type="number" domain={[0, 100]} angleAxisId={0} tick={false} />
-                              <RadialBar background clockWise dataKey="value" cornerRadius={10} />
+                              <RadialBar background dataKey="value" cornerRadius={10} />
                             </RadialBarChart>
                           </ResponsiveContainer>
                           <div className="absolute inset-0 flex flex-col items-center justify-center mt-8">
@@ -386,7 +390,7 @@ const Dashboard = () => {
 
 // --- SUB-COMPONENTS (Internal) ---
 
-const KPICard = ({ title, value, icon, isDark, trend, color }: any) => (
+const KPICard = ({ title, value, icon, trend, color }: any) => (
   <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 p-4 md:p-5 rounded-2xl shadow-lg relative overflow-hidden group hover:shadow-xl transition-shadow">
     <div className="flex justify-between items-start mb-2">
       <div className="p-2 bg-slate-100 dark:bg-slate-800 rounded-xl text-slate-600 dark:text-slate-300">
