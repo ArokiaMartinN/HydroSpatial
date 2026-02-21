@@ -1,485 +1,391 @@
-import React, {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useContext,
-} from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import parse from "html-react-parser";
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  Bot,
-  Send,
-  Plus,
-  MessageSquare,
-  Sparkles,
-  Menu,
-  X,
-} from "lucide-react";
-import { clsx, type ClassValue } from "clsx";
-import { twMerge } from "tailwind-merge";
-import { ThemeContext } from "../App";
+  Bot, Plus, Trash2,
+  User, Sparkles, Copy, Check, CornerDownLeft
+} from 'lucide-react';
+import { motion } from 'framer-motion';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { api } from '../services/api';
 
-/* ------------------------- UTILS ------------------------- */
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
+interface Message {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: number;
 }
 
-// IMPROVED MARKDOWN / HTML PARSER
-const parseMarkdown = (text: string) => {
-  let formatted = text
-    .replace(
-      /\* (.*?):/g,
-      '<br/><br/><strong class="text-blue-500 font-semibold">$1:</strong>'
-    )
-    .replace(/(?:\r\n|\r|\n)\s*\*\s+/g, "<br/>• ")
-    .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
-    .replace(
-      /```([\s\S]*?)```/g,
-      '<div class="bg-black/20 p-3 rounded-lg my-2 border border-white/10 font-mono text-xs overflow-x-auto"><code>$1</code></div>'
-    )
-    .replace(
-      /`([^`]+)`/g,
-      '<code class="bg-white/10 px-1.5 py-0.5 rounded font-mono text-xs">$1</code>'
-    )
-    .replace(/\n/g, "<br/>");
-  return formatted;
-};
-
-/* ------------------------- THEME CONFIG ------------------------- */
-const themeConfig = {
-  light: {
-    bg: "bg-white",
-    sidebar: "bg-slate-50 border-r border-slate-200",
-    textMain: "text-slate-800",
-    textMuted: "text-slate-500",
-    botBubble: "bg-transparent pl-0 text-slate-800",
-    userBubble: "bg-slate-100 text-slate-800 rounded-2xl",
-    inputBg: "bg-white border-t border-slate-200",
-    inputWrapper:
-      "bg-slate-100 border-transparent focus-within:bg-white focus-within:ring-2 ring-blue-500/20",
-    card: "bg-white border border-slate-200 shadow-sm hover:border-blue-400 cursor-pointer",
-    highlight: "bg-slate-200 text-slate-900 font-medium",
-  },
-  dark: {
-    bg: "bg-[#0B0F15]",
-    sidebar: "bg-[#0f141c] border-r border-white/5",
-    textMain: "text-slate-200",
-    textMuted: "text-slate-400",
-    botBubble: "bg-transparent pl-0 text-slate-200",
-    userBubble: "bg-[#1E232E] text-slate-200 border border-white/5",
-    inputBg: "bg-[#0B0F15] border-t border-white/5",
-    inputWrapper:
-      "bg-[#161b26] border border-white/5 focus-within:border-blue-500/50",
-    card: "bg-[#161b26] border border-white/5 hover:border-white/20 cursor-pointer",
-    highlight: "bg-white/10 text-white font-medium",
-  },
-};
-
-/* ------------------------- TYPES ------------------------- */
-type Attachment = {
-  id: string;
-  name: string;
-  size: number;
-  type: string;
-  url: string;
-};
-
-type Message = {
-  id: string;
-  text: string;
-  isBot: boolean;
-  timestamp: number;
-  attachments?: Attachment[];
-  isStreaming?: boolean;
-};
-
-type Conversation = {
+interface Session {
   id: string;
   title: string;
   messages: Message[];
-  lastModified: number;
+  createdAt: number;
+}
+
+// --- SIDEBAR ---
+const ChatSidebar = ({ sessions, activeId, onSelect, onNew, onDelete }: any) => (
+  <div className="w-64 h-full flex flex-col shrink-0"
+    style={{
+      background: 'linear-gradient(180deg, #ffffff 0%, #f5f3ff 100%)',
+      borderRight: '1px solid var(--border-main)',
+    }}>
+    <div className="p-4">
+      <button
+        onClick={onNew}
+        className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl transition-all"
+        style={{
+          background: 'var(--gradient-main)',
+          color: 'white',
+          boxShadow: 'var(--shadow-violet)',
+          fontFamily: 'var(--font-body)',
+          fontSize: 'var(--text-sm)',
+          fontWeight: '600',
+          letterSpacing: '0.01em',
+        }}
+        onMouseEnter={e => (e.currentTarget.style.filter = 'brightness(1.08)')}
+        onMouseLeave={e => (e.currentTarget.style.filter = '')}
+      >
+        <Plus size={15} />
+        New Chat
+      </button>
+    </div>
+
+    <div className="flex-1 overflow-y-auto px-2 pb-4">
+      <div className="text-label px-3 py-2" style={{ color: 'var(--text-tertiary)' }}>
+        Recent
+      </div>
+      {sessions.length === 0 && (
+        <div className="text-center text-xs py-6 italic" style={{ color: 'var(--text-tertiary)' }}>
+          No history
+        </div>
+      )}
+      {sessions.map((session: Session) => (
+        <div
+          key={session.id}
+          onClick={() => onSelect(session.id)}
+          className="group flex items-center justify-between px-3 py-2.5 rounded-xl cursor-pointer transition-all text-sm mb-1"
+          style={activeId === session.id
+            ? { background: 'var(--gradient-soft)', border: '1px solid var(--border-main)', color: 'var(--primary)', fontWeight: 600, fontFamily: 'var(--font-body)', fontSize: 'var(--text-sm)' }
+            : { color: 'var(--text-secondary)', border: '1px solid transparent', fontFamily: 'var(--font-body)', fontSize: 'var(--text-sm)' }
+          }
+          onMouseEnter={e => {
+            if (activeId !== session.id) {
+              (e.currentTarget as HTMLElement).style.background = 'var(--bg-hover)';
+              (e.currentTarget as HTMLElement).style.color = 'var(--primary)';
+            }
+          }}
+          onMouseLeave={e => {
+            if (activeId !== session.id) {
+              (e.currentTarget as HTMLElement).style.background = 'transparent';
+              (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)';
+            }
+          }}
+        >
+          <span className="truncate">{session.title}</span>
+          <button
+            onClick={(e) => { e.stopPropagation(); onDelete(session.id); }}
+            className="opacity-0 group-hover:opacity-100 p-1 rounded-md transition-all hover:text-rose-500"
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
+      ))}
+    </div>
+  </div>
+);
+
+// --- MESSAGE BUBBLE ---
+const ChatMessage = ({ msg, isTyping }: { msg: Message, isTyping?: boolean }) => {
+  const isUser = msg.role === 'user';
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(msg.content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className={`flex gap-4 w-full max-w-3xl mx-auto py-5 group`}
+    >
+      <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 mt-0.5 shadow-md`}
+        style={isUser
+          ? { background: 'var(--bg-hover)', border: '1px solid var(--border-main)' }
+          : { background: 'var(--gradient-main)', boxShadow: 'var(--shadow-violet)' }
+        }>
+        {isUser
+          ? <User size={16} style={{ color: 'var(--primary)' }} />
+          : <Bot size={16} color="white" />
+        }
+      </div>
+
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 mb-1.5">
+          <span className="font-semibold"
+            style={{ color: 'var(--text-main)', fontFamily: 'var(--font-display)', fontSize: 'var(--text-sm)', letterSpacing: '-0.01em' }}>
+            {isUser ? 'You' : 'HydroMind'}
+          </span>
+          {!isUser && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-md font-semibold badge-violet">
+              AI
+            </span>
+          )}
+        </div>
+
+        <div className="prose prose-sm max-w-none"
+          style={{
+            color: isUser ? 'var(--text-secondary)' : 'var(--text-main)',
+            fontFamily: 'var(--font-body)',
+            fontSize: 'var(--text-base)',
+            lineHeight: 'var(--leading-relaxed)',
+          }}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {msg.content + (isTyping ? '▍' : '')}
+          </ReactMarkdown>
+        </div>
+
+        {!isTyping && !isUser && (
+          <div className="flex items-center gap-3 mt-3 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              onClick={handleCopy}
+              className="flex items-center gap-1.5 text-xs font-medium rounded-lg px-2 py-1 transition-all"
+              style={{ color: 'var(--text-tertiary)', background: 'var(--bg-hover)' }}
+              onMouseEnter={e => (e.currentTarget.style.color = 'var(--primary)')}
+              onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-tertiary)')}
+            >
+              {copied ? <Check size={12} /> : <Copy size={12} />}
+              {copied ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+        )}
+      </div>
+    </motion.div>
+  );
 };
 
-// ✅ BACKEND URL (Flask)
-const API_BASE_URL = "http://localhost:5000"; // change if backend runs elsewhere
-
-/* ------------------------- MAIN COMPONENT ----------------- */
-const AIAssistant: React.FC = () => {
-  const { theme: globalTheme } = useContext(ThemeContext);
-  const t = globalTheme === "dark" ? themeConfig.dark : themeConfig.light;
-
-  const [conversations, setConversations] = useState<Conversation[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem("hydro-chat-history") || "[]");
-    } catch {
-      return [];
-    }
+// --- MAIN ---
+const AIAssistant = () => {
+  const [sessions, setSessions] = useState<Session[]>(() => {
+    const saved = localStorage.getItem('hydro_ai_sessions');
+    return saved ? JSON.parse(saved) : [];
   });
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [input, setInput] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [streamedResponse, setStreamedResponse] = useState('');
+  const [autoScroll, setAutoScroll] = useState(true);
 
-  const [activeConversationId, setActiveConversationId] =
-    useState<string | null>(null);
-  const [input, setInput] = useState("");
-  const [isTyping, setIsTyping] = useState(false);
-  const [isSidebarOpen, setSidebarOpen] = useState(true);
-  const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>(
-    []
-  );
-
-  const inputRef = useRef<HTMLTextAreaElement | null>(null);
-  const chatEndRef = useRef<HTMLDivElement | null>(null);
-
-  /* ------------------------- EFFECTS ------------------------- */
-  useEffect(() => {
-    localStorage.setItem("hydro-chat-history", JSON.stringify(conversations));
-  }, [conversations]);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const activeSession = sessions.find(s => s.id === activeSessionId);
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [conversations, isTyping, activeConversationId]);
+    localStorage.setItem('hydro_ai_sessions', JSON.stringify(sessions));
+  }, [sessions]);
 
-  /* ------------------------- ACTIONS ------------------------- */
-  const goHome = () => {
-    setActiveConversationId(null);
-    if (window.innerWidth < 1024) setSidebarOpen(false);
-    setTimeout(() => inputRef.current?.focus(), 100);
+  useEffect(() => {
+    if (autoScroll && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [activeSession?.messages, streamedResponse, autoScroll]);
+
+  const createNewSession = () => {
+    const newSession: Session = {
+      id: crypto.randomUUID(),
+      title: 'New Discussion',
+      messages: [],
+      createdAt: Date.now()
+    };
+    setSessions(prev => [newSession, ...prev]);
+    setActiveSessionId(newSession.id);
+    if (inputRef.current) inputRef.current.focus();
   };
 
-  const handleSend = async (msg = input) => {
-    if (!msg.trim() && pendingAttachments.length === 0) return;
+  const deleteSession = (id: string) => {
+    setSessions(prev => prev.filter(s => s.id !== id));
+    if (activeSessionId === id) setActiveSessionId(null);
+  };
 
-    // 1. Ensure there is an active conversation
-    let currentId = activeConversationId;
-    if (!currentId) {
-      const newId = Date.now().toString();
-      const newConv: Conversation = {
-        id: newId,
-        title: msg.slice(0, 40) || "New Analysis",
-        messages: [],
-        lastModified: Date.now(),
-      };
-      setConversations((prev) => [newConv, ...prev]);
-      setActiveConversationId(newId);
-      currentId = newId;
-    }
+  const handleSubmit = async () => {
+    if (!input.trim() || !activeSessionId) return;
 
-    // 2. Add user message
-    const userMsg: Message = {
-      id: `u-${Date.now()}`,
-      text: msg,
-      isBot: false,
-      timestamp: Date.now(),
-      attachments: [...pendingAttachments],
-    };
+    const userMsg: Message = { id: crypto.randomUUID(), role: 'user', content: input, timestamp: Date.now() };
+    const updatedSessions = sessions.map(s => {
+      if (s.id === activeSessionId) {
+        return { ...s, messages: [...s.messages, userMsg], title: s.messages.length === 0 ? input.slice(0, 40) : s.title };
+      }
+      return s;
+    });
 
-    const convIdForClosure = currentId; // capture for async
-
-    setConversations((prev) =>
-      prev.map((c) =>
-        c.id === convIdForClosure
-          ? {
-              ...c,
-              messages: [...c.messages, userMsg],
-              lastModified: Date.now(),
-              title:
-                c.messages.length === 0
-                  ? msg.slice(0, 30) || "New Analysis"
-                  : c.title,
-            }
-          : c
-      )
-    );
-
-    setInput("");
-    setPendingAttachments([]);
-    setIsTyping(true);
+    setSessions(updatedSessions);
+    setInput('');
+    setIsProcessing(true);
+    setAutoScroll(true);
+    setStreamedResponse('');
 
     try {
-      // 3. Call Flask backend /query
-      const response = await fetch(`${API_BASE_URL}/query`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          query: msg,
-          // You can later send dynamic context (selected district, state, etc.)
-          context: "Hydrological dataset analysis for groundwater and rainfall.",
-        }),
-      });
+      const response = await api.queryAI("Context: Advanced Hydrology", userMsg.content);
+      const fullText = response.answer || "Processing request...";
 
-      const data = await response.json();
+      let currentText = "";
+      const words = fullText.split(" ");
+      for (let i = 0; i < words.length; i++) {
+        currentText += words[i] + " ";
+        setStreamedResponse(currentText);
+        await new Promise(r => setTimeout(r, 15));
+      }
 
-      const aiText: string =
-        data?.answer ||
-        "AI analysis not available. Please check backend response.";
-
-      // 4. Add bot message
-      const botMsg: Message = {
-        id: `b-${Date.now()}`,
-        text: aiText,
-        isBot: true,
-        timestamp: Date.now(),
-        isStreaming: false,
-      };
-
-      setConversations((prev) =>
-        prev.map((c) =>
-          c.id === convIdForClosure
-            ? { ...c, messages: [...c.messages, botMsg] }
-            : c
-        )
-      );
-    } catch (error) {
-      console.error("Error calling backend:", error);
-      const errorMsg: Message = {
-        id: `b-${Date.now()}`,
-        text:
-          "⚠️ Error connecting to AI backend. Please make sure the Flask server is running.",
-        isBot: true,
-        timestamp: Date.now(),
-        isStreaming: false,
-      };
-      setConversations((prev) =>
-        prev.map((c) =>
-          c.id === convIdForClosure
-            ? { ...c, messages: [...c.messages, errorMsg] }
-            : c
-        )
-      );
+      const aiMsg: Message = { id: crypto.randomUUID(), role: 'assistant', content: fullText, timestamp: Date.now() };
+      setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, messages: [...s.messages, aiMsg] } : s));
+    } catch (e) {
+      console.error(e);
     } finally {
-      setIsTyping(false);
+      setIsProcessing(false);
+      setStreamedResponse('');
     }
   };
 
-  const activeMessages = useMemo(
-    () =>
-      conversations.find((c) => c.id === activeConversationId)?.messages || [],
-    [conversations, activeConversationId]
-  );
+  useEffect(() => {
+    if (sessions.length === 0 && !activeSessionId) createNewSession();
+    else if (sessions.length > 0 && !activeSessionId) setActiveSessionId(sessions[0].id);
+  }, []);
 
-  /* ------------------------- RENDER ------------------------- */
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit();
+    }
+  };
+
+  const suggestions = ['Analyze northern sector risk', 'Show rainfall trends', 'Draft safety report'];
+
   return (
-    <div
-      className={cn(
-        "flex h-screen w-full overflow-hidden font-sans transition-colors duration-300 relative",
-        t.bg
-      )}
-    >
-      {/* SIDEBAR */}
-      <AnimatePresence>
-        {isSidebarOpen && (
-          <motion.aside
-            initial={{ x: -280, opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={{ x: -280, opacity: 0 }}
-            className={cn(
-              "h-full flex-shrink-0 flex flex-col z-50 shadow-xl lg:shadow-none w-[280px] absolute lg:relative",
-              t.sidebar
-            )}
-          >
-            <div className="p-4 flex flex-col gap-4 h-full">
-              <div className="flex items-center justify-between px-2 mb-2">
-                <div
-                  onClick={goHome}
-                  className="flex items-center gap-3 cursor-pointer hover:opacity-80"
-                >
-                  <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white shadow-lg shadow-blue-600/20">
-                    <Bot size={18} />
-                  </div>
-                  <div className="flex flex-col">
-                    <span className={cn("font-bold text-sm", t.textMain)}>
-                      HydroSpatial
-                    </span>
-                  </div>
+    <div className="flex h-full w-full font-sans" style={{ background: 'var(--bg-main)' }}>
+
+      <ChatSidebar
+        sessions={sessions}
+        activeId={activeSessionId}
+        onSelect={setActiveSessionId}
+        onNew={createNewSession}
+        onDelete={deleteSession}
+      />
+
+      <div className="flex-1 flex flex-col relative" style={{ background: 'white' }}>
+        {/* Messages */}
+        <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 scroll-smooth">
+          <div className="max-w-3xl mx-auto pb-40 pt-10">
+            {activeSession?.messages.length === 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex flex-col items-center justify-center min-h-[50vh] text-center space-y-6"
+              >
+                <div className="w-16 h-16 rounded-2xl flex items-center justify-center shadow-xl animate-float"
+                  style={{ background: 'var(--gradient-main)', boxShadow: 'var(--shadow-violet)' }}>
+                  <Sparkles size={28} color="white" />
                 </div>
-                <button
-                  onClick={() => setSidebarOpen(false)}
-                  className="lg:hidden text-slate-400"
-                >
-                  <X size={18} />
-                </button>
-              </div>
+                <div>
+                  <h2 className="text-display" style={{ color: 'var(--text-main)', fontSize: 'var(--text-2xl)' }}>
+                    How can I help you today?
+                  </h2>
+                  <p className="mt-2 max-w-md mx-auto text-body-sm" style={{ color: 'var(--text-secondary)' }}>
+                    Analyze risk factors, query historical flood data, or help draft compliance reports.
+                  </p>
+                </div>
 
-              <button
-                onClick={goHome}
-                className={cn(
-                  "flex items-center gap-3 px-3 py-3 rounded-lg border text-sm font-medium",
-                  globalTheme === "dark"
-                    ? "bg-white/5 border-white/5"
-                    : "bg-white border-slate-200"
-                )}
-              >
-                <Plus size={16} className="text-blue-500" /> New Analysis
-              </button>
-
-              <div className="flex-1 overflow-y-auto custom-scrollbar space-y-1">
-                {conversations.map((c) => (
-                  <div
-                    key={c.id}
-                    onClick={() => setActiveConversationId(c.id)}
-                    className={cn(
-                      "px-3 py-2.5 rounded-md cursor-pointer text-sm truncate flex items-center gap-3",
-                      activeConversationId === c.id
-                        ? t.highlight
-                        : t.textMuted
-                    )}
-                  >
-                    <MessageSquare size={14} />{" "}
-                    <span className="truncate flex-1">{c.title}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </motion.aside>
-        )}
-      </AnimatePresence>
-
-      {/* MAIN CONTENT */}
-      <main className="flex-1 flex flex-col h-full relative min-w-0">
-        {/* HEADER */}
-        <div className="h-14 flex-shrink-0 flex items-center justify-between px-6 border-b border-white/5 z-10">
-          <div className="flex items-center gap-3">
-            {!isSidebarOpen && (
-              <button
-                onClick={() => setSidebarOpen(true)}
-                className={cn("p-2 rounded-md", t.textMain)}
-              >
-                <Menu size={20} />
-              </button>
+                <div className="flex flex-wrap justify-center gap-2 max-w-lg">
+                  {suggestions.map(sug => (
+                    <button
+                      key={sug}
+                      onClick={() => { setInput(sug); if (inputRef.current) inputRef.current.focus(); }}
+                      className="text-body-sm px-4 py-2 rounded-xl font-medium border transition-all"
+                      style={{
+                        background: 'var(--bg-subtle)',
+                        border: '1px solid var(--border-main)',
+                        color: 'var(--text-secondary)',
+                      }}
+                      onMouseEnter={e => {
+                        (e.currentTarget as HTMLElement).style.background = 'var(--gradient-soft)';
+                        (e.currentTarget as HTMLElement).style.color = 'var(--primary)';
+                        (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-strong)';
+                      }}
+                      onMouseLeave={e => {
+                        (e.currentTarget as HTMLElement).style.background = 'var(--bg-subtle)';
+                        (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)';
+                        (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-main)';
+                      }}
+                    >
+                      {sug}
+                    </button>
+                  ))}
+                </div>
+              </motion.div>
             )}
-            {activeConversationId && (
-              <span className={cn("font-medium text-sm", t.textMain)}>
-                Analysis Session
-              </span>
+
+            {activeSession?.messages.map(msg => (
+              <ChatMessage key={msg.id} msg={msg} />
+            ))}
+
+            {isProcessing && (
+              <ChatMessage
+                msg={{ id: 'stream', role: 'assistant', content: streamedResponse, timestamp: Date.now() }}
+                isTyping
+              />
             )}
           </div>
         </div>
 
-        {/* CHAT AREA */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar px-4 lg:px-0 scroll-smooth">
-          {!activeConversationId ? (
-            // WELCOME SCREEN
-            <div className="h-full flex flex-col items-center justify-center p-4">
-              <div className="text-center max-w-2xl mb-12">
-                <div className="w-16 h-16 mx-auto bg-blue-600 rounded-2xl flex items-center justify-center mb-6 shadow-lg shadow-blue-600/20">
-                  <Sparkles size={32} className="text-white" />
-                </div>
-                <h2 className={cn("text-3xl font-bold mb-3", t.textMain)}>
-                  HydroSpatial AI
-                </h2>
-                <p className={cn("text-base", t.textMuted)}>
-                  Advanced hydrological data analysis.
-                </p>
-              </div>
-            </div>
-          ) : (
-            // CHAT MESSAGES
-            <div className="max-w-3xl mx-auto py-8 space-y-6 px-4">
-              {activeMessages.map((msg) => (
-                <motion.div
-                  key={msg.id}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className={cn(
-                    "flex gap-4",
-                    msg.isBot ? "justify-start" : "justify-end"
-                  )}
-                >
-                  {msg.isBot && (
-                    <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center flex-shrink-0 mt-1">
-                      <Bot size={16} className="text-white" />
-                    </div>
-                  )}
-
-                  <div
-                    className={cn(
-                      "flex flex-col max-w-[85%]",
-                      msg.isBot ? "items-start" : "items-end"
-                    )}
-                  >
-                    <div
-                      className={cn(
-                        "text-xs font-semibold mb-1 opacity-50",
-                        t.textMain
-                      )}
-                    >
-                      {msg.isBot ? "HydroAI" : "You"}
-                    </div>
-
-                    <div
-                      className={cn(
-                        "px-5 py-3 text-[15px] leading-relaxed shadow-sm",
-                        msg.isBot
-                          ? t.botBubble
-                          : `${t.userBubble} rounded-tr-none`
-                      )}
-                    >
-                      <div className="markdown-body">
-                        {parse(parseMarkdown(msg.text))}
-                      </div>
-                    </div>
-                  </div>
-                </motion.div>
-              ))}
-
-              {isTyping && (
-                <div className="text-xs text-slate-500 px-4">
-                  HydroAI is thinking…
-                </div>
-              )}
-
-              <div ref={chatEndRef} />
-            </div>
-          )}
-        </div>
-
-        {/* INPUT AREA */}
-        <div className={cn("flex-shrink-0 p-4 z-20", t.inputBg)}>
-          <div className="w-full max-w-3xl mx-auto">
-            <div
-              className={cn(
-                "rounded-2xl p-2 pl-4 flex items-end gap-3 transition-all",
-                t.inputWrapper
-              )}
+        {/* Input */}
+        <div className="absolute bottom-0 left-0 right-0 p-6 backdrop-blur-xl"
+          style={{ background: 'rgba(255,255,255,0.85)', borderTop: '1px solid var(--border-subtle)' }}>
+          <div className="max-w-3xl mx-auto">
+            <div className="relative flex items-end gap-2 rounded-2xl p-2 transition-all"
+              style={{
+                background: 'var(--bg-subtle)',
+                border: '1.5px solid var(--border-main)',
+              }}
+              onFocusCapture={e => (e.currentTarget as HTMLElement).style.borderColor = 'var(--primary)'}
+              onBlurCapture={e => (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-main)'}
             >
               <textarea
                 ref={inputRef}
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSend();
-                  }
-                }}
-                placeholder="Ask HydroSpatial AI..."
-                className={cn(
-                  "flex-1 max-h-32 py-3 bg-transparent outline-none resize-none text-[15px]",
-                  t.textMain
-                )}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Message HydroMind..."
+                className="flex-1 bg-transparent px-3 py-3 outline-none resize-none max-h-32"
+                style={{ color: 'var(--text-main)', minHeight: '44px', fontFamily: 'var(--font-body)', fontSize: 'var(--text-base)', lineHeight: 'var(--leading-relaxed)' }}
                 rows={1}
               />
-              <button
-                onClick={() => handleSend()}
-                disabled={!input.trim()}
-                className={cn(
-                  "mb-1 p-2 rounded-xl transition-all",
-                  input.trim()
-                    ? "bg-blue-600 text-white"
-                    : "bg-slate-700 text-slate-400"
-                )}
-              >
-                <Send size={18} />
-              </button>
+              <div className="pb-1 pr-1">
+                <button
+                  onClick={handleSubmit}
+                  disabled={!input.trim() || isProcessing}
+                  className="p-2.5 rounded-xl text-white transition-all disabled:opacity-40"
+                  style={{ background: 'var(--gradient-main)', boxShadow: 'var(--shadow-violet)' }}
+                  onMouseEnter={e => {
+                    if (!(!input.trim() || isProcessing))
+                      (e.currentTarget as HTMLElement).style.filter = 'brightness(1.1)';
+                  }}
+                  onMouseLeave={e => (e.currentTarget as HTMLElement).style.filter = ''}
+                >
+                  {isProcessing
+                    ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    : <CornerDownLeft size={16} />
+                  }
+                </button>
+              </div>
             </div>
-            <div className="text-center mt-2 text-[10px] text-slate-500">
-              HydroSpatial AI can make mistakes. Please verify important
-              information.
+            <div className="text-center mt-3 text-caption tracking-wide"
+              style={{ color: 'var(--text-tertiary)' }}>
+              AI can make mistakes. Verify important information.
             </div>
           </div>
         </div>
-      </main>
+      </div>
     </div>
   );
 };

@@ -1,478 +1,449 @@
-import { useState, useEffect, useMemo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Search, ChevronRight, AlertTriangle, Droplet, 
-  Wind, Activity, ArrowRight, LayoutGrid, BarChart3,
-  Waves, ThermometerSun, BrainCircuit, RefreshCw
+import React, { useState, useEffect } from 'react';
+import {
+  AlertTriangle, Activity, Wind, Info, ChevronRight,
+  Shield, AlertOctagon, CheckCircle2, Sparkles, Map as MapIcon,
+  ArrowLeft, Droplets, Layers, RefreshCw
 } from 'lucide-react';
-import { 
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie
-} from 'recharts';
+import { motion } from 'framer-motion';
+import { api } from '../services/api';
+import { RiskHierarchy, StateData, District } from '../types';
 
-// --- TYPES (Must match Backend JSON) ---
-interface DistrictMetrics {
-  stage: number;
-  rainfall: number;
-  recharge: number;
-  extraction_irrigation: number;
-  extraction_domestic: number;
-}
-
-interface District {
-  id: string;
-  name: string;
-  status: string; // 'Critical', 'Safe' etc
-  risk: 'High' | 'Medium' | 'Low';
-  metrics: DistrictMetrics;
-}
-
-interface StateData {
-  name: string;
-  risk: 'High' | 'Medium' | 'Low';
-  avg_extraction: number;
-  districts: District[];
-}
-
-// --- COMPONENTS ---
-
-const RiskBadge = ({ risk }: { risk: string }) => {
-  const styles = {
-    High: 'bg-red-500/10 text-red-400 border-red-500/20',
-    Medium: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-    Low: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-  };
-  return (
-    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${styles[risk as keyof typeof styles] || styles.Low}`}>
-      {risk}
-    </span>
-  );
-};
-
-const MetricCard = ({ label, value, unit, icon: Icon, color, subtext }: any) => (
-  <div className="bg-[#1A1D24]/40 backdrop-blur-sm border border-white/5 p-4 rounded-xl flex items-center justify-between group hover:border-white/10 transition-all hover:bg-[#1A1D24]/60">
-    <div>
-      <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mb-1">{label}</p>
-      <div className="text-2xl font-mono font-bold text-white tracking-tight">
-        {value} <span className="text-sm text-slate-600 font-sans font-normal">{unit}</span>
-      </div>
-      {subtext && <p className="text-xs text-slate-500 mt-1">{subtext}</p>}
-    </div>
-    <div className={`p-3 rounded-lg ${color} bg-opacity-10 text-white opacity-80 group-hover:opacity-100 group-hover:scale-110 transition-all`}>
-      <Icon size={20} />
-    </div>
-  </div>
-);
-
-// --- MAIN DASHBOARD ---
+const DEMO_DATA: RiskHierarchy = [
+  {
+    name: "Maharashtra", risk: "High", avg_extraction: 78,
+    districts: [
+      { id: 'm1', name: 'Pune', status: 'Safe', risk: 'Low', metrics: { stage: 55, rainfall: 700, recharge: 120, extraction_irrigation: 40, extraction_domestic: 20 } },
+      { id: 'm2', name: 'Latur', status: 'Critical', risk: 'High', metrics: { stage: 92, rainfall: 400, recharge: 80, extraction_irrigation: 85, extraction_domestic: 10 } },
+      { id: 'm3', name: 'Nashik', status: 'Semi-Critical', risk: 'Medium', metrics: { stage: 68, rainfall: 550, recharge: 100, extraction_irrigation: 60, extraction_domestic: 15 } },
+    ]
+  },
+  {
+    name: "Karnataka", risk: "Medium", avg_extraction: 65,
+    districts: [
+      { id: 'k1', name: 'Bangalore Urban', status: 'Over-Exploited', risk: 'High', metrics: { stage: 120, rainfall: 850, recharge: 200, extraction_irrigation: 10, extraction_domestic: 90 } },
+      { id: 'k2', name: 'Mysore', status: 'Safe', risk: 'Low', metrics: { stage: 45, rainfall: 900, recharge: 150, extraction_irrigation: 50, extraction_domestic: 20 } },
+    ]
+  },
+  {
+    name: "Punjab", risk: "High", avg_extraction: 160,
+    districts: [
+      { id: 'p1', name: 'Ludhiana', status: 'Critical', risk: 'High', metrics: { stage: 165, rainfall: 400, recharge: 50, extraction_irrigation: 95, extraction_domestic: 5 } },
+    ]
+  },
+  {
+    name: "Rajasthan", risk: "High", avg_extraction: 140,
+    districts: [
+      { id: 'r1', name: 'Jaipur', status: 'Critical', risk: 'High', metrics: { stage: 140, rainfall: 300, recharge: 40, extraction_irrigation: 80, extraction_domestic: 30 } }
+    ]
+  }
+];
 
 const RiskAnalysis = () => {
-  const [data, setData] = useState<StateData[]>([]);
+  const [hierarchy, setHierarchy] = useState<RiskHierarchy>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeState, setActiveState] = useState<StateData | null>(null);
-  const [activeDistrict, setActiveDistrict] = useState<District | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [aiInsight, setAiInsight] = useState<string | null>(null);
-  const [insightLoading, setInsightLoading] = useState(false);
+  const [selectedState, setSelectedState] = useState<StateData | null>(null);
+  const [selectedDistrict, setSelectedDistrict] = useState<District | null>(null);
+  const [aiInsight, setAiInsight] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
 
-  const fetchData = () => {
+  useEffect(() => { fetchData(); }, []);
+
+  const fetchData = async () => {
     setLoading(true);
-    setError(null);
-    fetch('http://127.0.0.1:5000/api/risk-hierarchy')
-      .then(res => {
-        if (!res.ok) throw new Error("Server Error");
-        return res.json();
-      })
-      .then(fetchedData => {
-        if (Array.isArray(fetchedData) && fetchedData.length > 0) {
-            const sorted = fetchedData.sort((a: any, b: any) => b.avg_extraction - a.avg_extraction);
-            setData(sorted);
-        } else {
-            setError("No data found. Please check backend CSV files.");
-        }
-        setLoading(false);
-      })
-      .catch(err => {
-        console.error(err);
-        setError("Failed to connect to Backend.");
-        setLoading(false);
-      });
-  };
-
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  // Filter states
-  const filteredStates = useMemo(() => {
-    return data.filter(s => s.name.toLowerCase().includes(searchTerm.toLowerCase()));
-  }, [data, searchTerm]);
-
-  const generateInsight = async (district: District) => {
-    setInsightLoading(true);
-    setAiInsight(null);
     try {
-      const contextData = `
-        District: ${district.name}
-        Groundwater Stage: ${district.metrics.stage}%
-        Annual Rainfall: ${district.metrics.rainfall} mm
-        Total Recharge: ${district.metrics.recharge}
-        Irrigation Use: ${district.metrics.extraction_irrigation}
-        Domestic Use: ${district.metrics.extraction_domestic}
-      `;
-      
-      const res = await fetch('http://127.0.0.1:5000/query', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-            context: contextData,
-            query: "Evaluate sustainability and suggest 2 mitigations." 
-        })
-      });
-      const json = await res.json();
-      setAiInsight(json.answer);
-    } catch (e) {
-      setAiInsight("AI Service unavailable.");
+      const data = await api.getRiskHierarchy();
+      if (Array.isArray(data) && data.length > 0) {
+        setHierarchy(data);
+      } else throw new Error("Empty data");
+    } catch (err) {
+      setHierarchy(DEMO_DATA);
+      setError("Backend unreachable. Showing demo data.");
     } finally {
-      setInsightLoading(false);
+      setLoading(false);
     }
   };
 
-  if (loading) return (
-    <div className="h-screen w-full bg-[#090a0c] flex items-center justify-center text-blue-500">
-      <div className="flex flex-col items-center gap-4">
-        <Activity className="animate-spin" size={32} />
-        <span className="text-sm font-mono uppercase tracking-widest text-slate-500">Loading Hydro-Spatial Data...</span>
+  const getRiskGradient = (risk: string) => {
+    switch (risk?.toLowerCase()) {
+      case 'high': return 'from-rose-500 to-red-600';
+      case 'medium': return 'from-amber-400 to-orange-500';
+      case 'low': return 'from-emerald-400 to-teal-500';
+      default: return 'from-slate-400 to-slate-500';
+    }
+  };
+
+  const getRiskBadge = (risk: string) => {
+    const r = risk?.toLowerCase();
+    if (r === 'high') return <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-100 text-xs font-bold"><AlertOctagon size={11} /> High Risk</span>;
+    if (r === 'medium') return <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-100 text-xs font-bold"><AlertTriangle size={11} /> Moderate</span>;
+    return <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100 text-xs font-bold"><CheckCircle2 size={11} /> Stable</span>;
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-full min-h-[60vh]">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 rounded-full border-4 border-t-transparent animate-spin"
+            style={{ borderColor: 'var(--border-main)', borderTopColor: 'var(--primary)' }} />
+          <p className="text-sm font-medium animate-pulse" style={{ color: 'var(--text-tertiary)' }}>
+            Synchronizing with Neural Grid...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // National Overview
+  if (!selectedState) {
+    return (
+      <div className="p-8 max-w-[1600px] mx-auto animate-fade-in">
+        <div className="flex justify-between items-end mb-8">
+          <div>
+            <h1 className="text-3xl font-extrabold tracking-tight"
+              style={{ color: 'var(--text-main)', fontFamily: 'Plus Jakarta Sans' }}>
+              National Risk Assessment
+            </h1>
+            <p className="mt-1.5 text-sm" style={{ color: 'var(--text-secondary)' }}>
+              Real-time hydrological monitoring across <strong>{hierarchy.length}</strong> territories.
+            </p>
+          </div>
+          {error && (
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium"
+              style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e' }}>
+              <Info size={14} />
+              <span>{error}</span>
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+          {hierarchy.map((state, i) => (
+            <motion.div
+              key={state.name}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.06 }}
+              whileHover={{ y: -5 }}
+              onClick={() => { setSelectedState(state); setSelectedDistrict(state.districts[0] || null); }}
+              className="group rounded-2xl p-6 border cursor-pointer relative overflow-hidden transition-all"
+              style={{
+                background: 'white',
+                border: '1px solid var(--border-main)',
+                boxShadow: 'var(--shadow-sm)',
+              }}
+              onMouseEnter={e => {
+                (e.currentTarget as HTMLElement).style.boxShadow = 'var(--shadow-md)';
+                (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-strong)';
+              }}
+              onMouseLeave={e => {
+                (e.currentTarget as HTMLElement).style.boxShadow = 'var(--shadow-sm)';
+                (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-main)';
+              }}
+            >
+              {/* Risk color bar on left */}
+              <div className={`absolute top-0 left-0 w-1.5 h-full rounded-l-2xl bg-gradient-to-b ${getRiskGradient(state.risk)}`} />
+
+              <div className="flex justify-between items-start mb-4 pl-2">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-md"
+                  style={{ background: 'var(--gradient-main)', boxShadow: 'var(--shadow-violet)' }}>
+                  <MapIcon size={18} />
+                </div>
+                {getRiskBadge(state.risk)}
+              </div>
+
+              <h3 className="text-lg font-bold mb-1 pl-2" style={{ color: 'var(--text-main)', fontFamily: 'Plus Jakarta Sans' }}>
+                {state.name}
+              </h3>
+              <p className="text-xs pl-2 mb-5" style={{ color: 'var(--text-tertiary)' }}>
+                {state.districts.length} Monitored Zones
+              </p>
+
+              <div className="rounded-xl p-3" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border-subtle)' }}>
+                <div className="flex justify-between items-end mb-2">
+                  <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>Avg. Extraction</span>
+                  <span className="text-lg font-bold" style={{ color: 'var(--text-main)' }}>{state.avg_extraction}%</span>
+                </div>
+                <div className="h-1.5 w-full rounded-full overflow-hidden" style={{ background: 'var(--bg-hover)' }}>
+                  <div
+                    className={`h-full rounded-full bg-gradient-to-r ${state.avg_extraction > 100 ? 'from-rose-500 to-red-600' : 'from-indigo-500 to-violet-600'}`}
+                    style={{ width: `${Math.min(state.avg_extraction, 100)}%` }}
+                  />
+                </div>
+              </div>
+            </motion.div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // State Detail View
+  return (
+    <div className="flex h-full animate-fade-in" style={{ background: 'var(--bg-main)' }}>
+
+      {/* District Sidebar */}
+      <div className="w-72 flex-shrink-0 flex flex-col z-10"
+        style={{
+          background: 'linear-gradient(180deg, #ffffff 0%, #f5f3ff 100%)',
+          borderRight: '1px solid var(--border-main)',
+        }}>
+        <div className="p-5" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+          <button
+            onClick={() => setSelectedState(null)}
+            className="flex items-center gap-2 text-sm mb-4 transition-all"
+            style={{ color: 'var(--text-tertiary)' }}
+            onMouseEnter={e => (e.currentTarget.style.color = 'var(--primary)')}
+            onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-tertiary)')}
+          >
+            <ArrowLeft size={15} /> Back to National
+          </button>
+          <h2 className="text-xl font-bold" style={{ color: 'var(--text-main)', fontFamily: 'Plus Jakarta Sans' }}>
+            {selectedState.name}
+          </h2>
+          <div className="mt-2 flex items-center gap-2">
+            {getRiskBadge(selectedState.risk)}
+            <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>• {selectedState.districts.length} Districts</span>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-2 space-y-1">
+          {selectedState.districts.map(district => (
+            <button
+              key={district.id}
+              onClick={() => { setSelectedDistrict(district); setAiInsight(''); }}
+              className="w-full text-left px-4 py-3 rounded-xl text-sm transition-all flex items-center justify-between"
+              style={selectedDistrict?.id === district.id
+                ? { background: 'var(--gradient-main)', color: 'white', boxShadow: 'var(--shadow-violet)', fontWeight: 600 }
+                : { color: 'var(--text-secondary)', border: '1px solid transparent' }
+              }
+              onMouseEnter={e => {
+                if (selectedDistrict?.id !== district.id) {
+                  (e.currentTarget as HTMLElement).style.background = 'var(--bg-hover)';
+                  (e.currentTarget as HTMLElement).style.color = 'var(--primary)';
+                }
+              }}
+              onMouseLeave={e => {
+                if (selectedDistrict?.id !== district.id) {
+                  (e.currentTarget as HTMLElement).style.background = 'transparent';
+                  (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)';
+                }
+              }}
+            >
+              <span className="font-medium">{district.name}</span>
+              {selectedDistrict?.id === district.id && <ChevronRight size={14} />}
+              {selectedDistrict?.id !== district.id && district.risk === 'High' && (
+                <div className="w-2 h-2 rounded-full bg-rose-500" />
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* District Detail */}
+      <div className="flex-1 overflow-y-auto p-8">
+        {selectedDistrict ? (
+          <div className="max-w-4xl mx-auto space-y-6">
+
+            {/* Header */}
+            <div className="flex items-start justify-between">
+              <div>
+                <div className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'var(--text-tertiary)' }}>
+                  District Analysis
+                </div>
+                <h1 className="text-4xl font-extrabold tracking-tight mb-2"
+                  style={{ color: 'var(--text-main)', fontFamily: 'Plus Jakarta Sans' }}>
+                  {selectedDistrict.name}
+                </h1>
+                <div className={`inline-block px-3 py-1 rounded-full text-xs font-bold border ${selectedDistrict.status === 'Critical' ? 'bg-rose-50 border-rose-100 text-rose-700' :
+                    selectedDistrict.status === 'Safe' ? 'bg-emerald-50 border-emerald-100 text-emerald-700' :
+                      'bg-amber-50 border-amber-100 text-amber-700'
+                  }`}>
+                  Status: {selectedDistrict.status}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={fetchData}
+                  className="p-2.5 rounded-xl transition-all"
+                  style={{ background: 'white', border: '1px solid var(--border-main)', color: 'var(--text-secondary)', boxShadow: 'var(--shadow-xs)' }}
+                >
+                  <RefreshCw size={16} />
+                </button>
+                <button className="px-4 py-2.5 rounded-xl text-sm font-semibold transition-all"
+                  style={{ background: 'white', border: '1px solid var(--border-main)', color: 'var(--text-secondary)', boxShadow: 'var(--shadow-xs)' }}>
+                  Export PDF
+                </button>
+              </div>
+            </div>
+
+            {/* Metrics */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <MetricCard icon={Activity} label="Stage of Extraction" value={selectedDistrict.metrics.stage} unit="%" status={selectedDistrict.metrics.stage > 90 ? 'critical' : selectedDistrict.metrics.stage > 70 ? 'warning' : 'good'} />
+              <MetricCard icon={Wind} label="Annual Rainfall" value={selectedDistrict.metrics.rainfall} unit="mm" status={selectedDistrict.metrics.rainfall < 600 ? 'warning' : 'good'} />
+              <MetricCard icon={Droplets} label="GW Recharge" value={selectedDistrict.metrics.recharge} unit="mm" status={selectedDistrict.metrics.recharge < 100 ? 'critical' : 'good'} />
+            </div>
+
+            {/* AI Section */}
+            <div className="rounded-2xl p-8 border relative overflow-hidden"
+              style={{ background: 'white', border: '1px solid var(--border-main)', boxShadow: 'var(--shadow-md)' }}>
+              {/* Ambient glow */}
+              <div className="absolute -top-20 -right-20 w-64 h-64 rounded-full pointer-events-none"
+                style={{ background: 'radial-gradient(circle, rgba(99,102,241,0.08) 0%, transparent 70%)' }} />
+              <div className="relative z-10">
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center shadow-md"
+                      style={{ background: 'var(--gradient-main)', boxShadow: 'var(--shadow-violet)' }}>
+                      <Sparkles size={18} color="white" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold" style={{ color: 'var(--text-main)', fontFamily: 'Plus Jakarta Sans' }}>
+                        Neural Risk Assessment
+                      </h3>
+                      <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>Powered by HydroMind AI v2.1</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      setAiLoading(true);
+                      try {
+                        const res = await api.queryAI(
+                          `Hydrological Risk Context for ${selectedDistrict.name}, ${selectedState.name}. Metrics: Stage=${selectedDistrict.metrics.stage}%, Rainfall=${selectedDistrict.metrics.rainfall}mm.`,
+                          "Provide a concise technical risk assessment and 2 key mitigation strategies."
+                        );
+                        setAiInsight(res.answer);
+                      } catch (e) {
+                        setAiInsight("Unable to connect to Neural Engine. Please verify network connectivity.");
+                      } finally {
+                        setAiLoading(false);
+                      }
+                    }}
+                    disabled={aiLoading}
+                    className="btn-tech-primary px-5 py-2 text-sm flex items-center gap-2 disabled:opacity-60"
+                  >
+                    {aiLoading ? <span className="animate-pulse">Processing...</span> : 'Run Assessment'}
+                  </button>
+                </div>
+
+                <div className="min-h-[110px] rounded-xl p-6 border"
+                  style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border-subtle)' }}>
+                  {aiInsight ? (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="prose prose-sm max-w-none leading-relaxed"
+                      style={{ color: 'var(--text-secondary)' }}
+                    >
+                      {aiInsight}
+                    </motion.div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-full py-6 gap-3"
+                      style={{ color: 'var(--text-tertiary)' }}>
+                      <Activity size={22} className="opacity-40" />
+                      <p className="text-sm font-medium">Initiate analysis to generate predictive insights.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Extraction + Protocol */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              <div className="rounded-2xl p-6 border"
+                style={{ background: 'white', border: '1px solid var(--border-main)', boxShadow: 'var(--shadow-sm)' }}>
+                <h4 className="font-bold mb-6 flex items-center gap-2"
+                  style={{ color: 'var(--text-main)', fontFamily: 'Plus Jakarta Sans' }}>
+                  <Layers size={16} style={{ color: 'var(--primary)' }} />
+                  Extraction Breakdown
+                </h4>
+                <div className="space-y-5">
+                  {[
+                    { label: 'Irrigation', val: selectedDistrict.metrics.extraction_irrigation, color: '#6366f1' },
+                    { label: 'Domestic & Industrial', val: selectedDistrict.metrics.extraction_domestic, color: '#38bdf8' },
+                  ].map(b => (
+                    <div key={b.label}>
+                      <div className="flex justify-between text-sm mb-2">
+                        <span style={{ color: 'var(--text-secondary)' }}>{b.label}</span>
+                        <span className="font-bold" style={{ color: b.color }}>{b.val}%</span>
+                      </div>
+                      <div className="h-2.5 w-full rounded-full overflow-hidden" style={{ background: 'var(--bg-hover)' }}>
+                        <motion.div
+                          initial={{ width: 0 }} animate={{ width: `${b.val}%` }}
+                          transition={{ duration: 0.8, ease: 'easeOut' }}
+                          className="h-full rounded-full"
+                          style={{ background: `linear-gradient(90deg, ${b.color} 0%, ${b.color}99 100%)` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Conservation Protocol */}
+              <div className="rounded-2xl p-6 text-white relative overflow-hidden"
+                style={{ background: 'var(--gradient-main)', boxShadow: 'var(--shadow-violet)' }}>
+                <div className="absolute -bottom-8 -right-8 w-48 h-48 rounded-full opacity-20"
+                  style={{ background: 'radial-gradient(circle, rgba(255,255,255,0.5) 0%, transparent 70%)' }} />
+                <div className="relative z-10">
+                  <h4 className="font-bold mb-3 flex items-center gap-2">
+                    <Shield size={16} />
+                    Conservation Protocol
+                  </h4>
+                  <p className="text-sm opacity-80 leading-relaxed mb-6">
+                    Based on the current stage of extraction ({selectedDistrict.metrics.stage}%) and status ({selectedDistrict.status}),
+                    immediate intervention is recommended for this sector.
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    {[
+                      { label: 'Priority', value: 'High' },
+                      { label: 'Response', value: 'Tier-1' },
+                    ].map(stat => (
+                      <div key={stat.label} className="p-3 rounded-xl backdrop-blur-sm"
+                        style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.2)' }}>
+                        <div className="text-2xl font-bold mb-1">{stat.value}</div>
+                        <div className="text-[10px] opacity-60 uppercase tracking-widest">{stat.label}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full gap-3"
+            style={{ color: 'var(--text-tertiary)' }}>
+            <p className="text-sm">Select a district to view detailed analytics.</p>
+          </div>
+        )}
       </div>
     </div>
   );
+};
 
-  if (error) return (
-    <div className="h-screen w-full bg-[#090a0c] flex flex-col items-center justify-center text-slate-400 gap-4">
-        <AlertTriangle size={48} className="text-red-500" />
-        <h3 className="text-xl font-bold text-white">Connection Error</h3>
-        <p className="max-w-md text-center">{error}</p>
-        <button onClick={fetchData} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg flex items-center gap-2">
-            <RefreshCw size={16} /> Retry
-        </button>
-    </div>
-  );
+const MetricCard = ({ icon: Icon, label, value, unit, status }: any) => {
+  const colorMap: Record<string, { bg: string, text: string, border: string, icon: string }> = {
+    critical: { bg: '#fff1f2', text: '#be123c', border: '#fecdd3', icon: '#e11d48' },
+    warning: { bg: '#fffbeb', text: '#b45309', border: '#fde68a', icon: '#d97706' },
+    good: { bg: '#f0fdf4', text: '#15803d', border: '#bbf7d0', icon: '#22c55e' },
+  };
+  const c = colorMap[status] || colorMap.good;
 
   return (
-    <div className="h-[calc(100vh-4rem)] w-full bg-[#090a0c] text-slate-300 font-sans overflow-hidden flex flex-col">
-      
-      {/* HEADER */}
-      <header className="h-16 border-b border-white/5 bg-[#0e1014] flex items-center px-6 justify-between shrink-0 z-20">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-blue-600/20 rounded-lg border border-blue-500/30 text-blue-400">
-            <Waves size={20} />
-          </div>
-          <div>
-            <h1 className="text-lg font-bold text-white leading-none">Hydro<span className="text-blue-500">Logic</span> Pro</h1>
-            <p className="text-[10px] text-slate-500 font-mono tracking-widest uppercase mt-0.5">Risk Analysis Module</p>
-          </div>
+    <div className="p-5 rounded-xl border flex items-start justify-between transition-all"
+      style={{ background: 'white', border: '1px solid var(--border-main)', boxShadow: 'var(--shadow-sm)' }}
+      onMouseEnter={e => (e.currentTarget as HTMLElement).style.boxShadow = 'var(--shadow-md)'}
+      onMouseLeave={e => (e.currentTarget as HTMLElement).style.boxShadow = 'var(--shadow-sm)'}
+    >
+      <div>
+        <p className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--text-tertiary)' }}>{label}</p>
+        <div className="text-3xl font-bold tracking-tight" style={{ color: 'var(--text-main)' }}>
+          {value} <span className="text-sm font-medium" style={{ color: 'var(--text-tertiary)' }}>{unit}</span>
         </div>
-        
-        <div className="relative w-80 hidden md:block group">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 group-focus-within:text-blue-500 transition-colors" size={16} />
-          <input 
-            type="text" 
-            placeholder="Search States..." 
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-[#090a0c] border border-white/10 rounded-lg py-2 pl-10 pr-4 text-sm focus:outline-none focus:border-blue-500/50 transition-all placeholder:text-slate-700 text-slate-300"
-          />
-        </div>
-      </header>
-
-      {/* COLUMNS LAYOUT */}
-      <div className="flex-1 flex overflow-hidden">
-        
-        {/* COL 1: STATES */}
-        <div className="w-80 border-r border-white/5 bg-[#0e1014] flex flex-col shrink-0">
-          <div className="p-4 border-b border-white/5 bg-[#0e1014] sticky top-0 z-10">
-            <h2 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Select Region</h2>
-          </div>
-          <div className="flex-1 overflow-y-auto p-2 space-y-1 custom-scrollbar">
-            {filteredStates.map(state => (
-              <button
-                key={state.name}
-                onClick={() => { setActiveState(state); setActiveDistrict(null); setAiInsight(null); }}
-                className={`w-full flex items-center justify-between p-3.5 rounded-lg text-left transition-all border ${
-                  activeState?.name === state.name 
-                    ? 'bg-blue-600/10 border-blue-500/50 text-white shadow-[0_0_15px_rgba(37,99,235,0.15)]' 
-                    : 'bg-transparent border-transparent hover:bg-white/5 text-slate-400'
-                }`}
-              >
-                <div>
-                  <div className="font-medium text-sm">{state.name}</div>
-                  <div className="flex items-center gap-2 mt-1">
-                    <div className="h-1 w-12 bg-slate-800 rounded-full overflow-hidden">
-                      <div className={`h-full ${state.avg_extraction > 90 ? 'bg-red-500' : 'bg-blue-500'}`} style={{ width: `${Math.min(state.avg_extraction, 100)}%` }} />
-                    </div>
-                    <span className="text-[10px] text-slate-600">{state.avg_extraction.toFixed(0)}% Util</span>
-                  </div>
-                </div>
-                {activeState?.name === state.name ? <ChevronRight size={14} className="text-blue-500" /> : <RiskBadge risk={state.risk} />}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* COL 2: DISTRICTS */}
-        <AnimatePresence mode="wait">
-          {activeState ? (
-            <motion.div 
-              key={activeState.name}
-              initial={{ opacity: 0, x: -10 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -10 }}
-              className="w-96 border-r border-white/5 bg-[#0b0d10] flex flex-col shrink-0"
-            >
-              <div className="p-4 border-b border-white/5 bg-[#0b0d10] sticky top-0 z-10 flex justify-between items-center">
-                <h2 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Districts in {activeState.name}</h2>
-                <span className="text-[10px] text-slate-600">{activeState.districts.length} Zones</span>
-              </div>
-              <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
-                {activeState.districts.map((district) => (
-                  <button
-                    key={district.id}
-                    onClick={() => setActiveDistrict(district)}
-                    className={`w-full p-4 rounded-xl text-left transition-all border group relative overflow-hidden ${
-                      activeDistrict?.id === district.id
-                        ? 'bg-[#14161c] border-blue-500/40 shadow-lg'
-                        : 'bg-[#14161c]/40 border-white/5 hover:border-white/10 hover:bg-[#14161c]'
-                    }`}
-                  >
-                    <div className="flex justify-between items-start mb-2 relative z-10">
-                      <span className={`text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full ${
-                        district.status === 'Critical' ? 'bg-red-500/20 text-red-400' : 
-                        district.status === 'Semi-Critical' ? 'bg-amber-500/20 text-amber-400' : 'bg-emerald-500/10 text-emerald-400'
-                      }`}>
-                        {district.status}
-                      </span>
-                      {activeDistrict?.id === district.id && <ArrowRight size={14} className="text-blue-400" />}
-                    </div>
-                    
-                    <div className="font-bold text-base text-white mb-3 relative z-10">{district.name}</div>
-                    
-                    <div className="flex items-center gap-4 text-[10px] text-slate-500 relative z-10">
-                      <div className="flex items-center gap-1.5">
-                        <Activity size={10} />
-                        <span>{district.metrics.stage.toFixed(0)}% Ext</span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <Droplet size={10} />
-                        <span>{district.metrics.rainfall.toFixed(0)} mm</span>
-                      </div>
-                    </div>
-
-                    {activeDistrict?.id === district.id && (
-                      <motion.div layoutId="activeLine" className="absolute left-0 top-0 bottom-0 w-1 bg-blue-500" />
-                    )}
-                  </button>
-                ))}
-              </div>
-            </motion.div>
-          ) : (
-            <div className="w-96 border-r border-white/5 bg-[#0b0d10] flex items-center justify-center text-slate-700 text-sm">
-              Select a state to view districts
-            </div>
-          )}
-        </AnimatePresence>
-
-        {/* COL 3: ANALYTICS PANEL */}
-        <div className="flex-1 bg-[#090a0c] p-8 overflow-y-auto">
-          <AnimatePresence mode="wait">
-            {activeDistrict ? (
-              <motion.div
-                key={activeDistrict.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 20 }}
-                className="max-w-6xl mx-auto space-y-8"
-              >
-                {/* HEADER */}
-                <div className="flex items-end justify-between border-b border-white/10 pb-6">
-                  <div>
-                    <div className="flex items-center space-x-2 text-blue-500 text-xs font-bold tracking-widest mb-2 uppercase">
-                      <span>{activeState?.name}</span>
-                      <ChevronRight size={12} />
-                      <span className="text-slate-400">{activeDistrict.name}</span>
-                    </div>
-                    <h1 className="text-4xl font-bold text-white">{activeDistrict.name}</h1>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className="text-right">
-                      <div className="text-[10px] text-slate-500 uppercase tracking-widest">Risk Factor</div>
-                      <div className={`text-xl font-bold ${
-                        activeDistrict.risk === 'High' ? 'text-red-400' : 
-                        activeDistrict.risk === 'Medium' ? 'text-amber-400' : 'text-emerald-400'
-                      }`}>{activeDistrict.risk}</div>
-                    </div>
-                    <div className={`p-3 rounded-xl border ${
-                        activeDistrict.risk === 'High' ? 'bg-red-500/10 border-red-500/20 text-red-400' : 
-                        activeDistrict.risk === 'Medium' ? 'bg-amber-500/10 border-amber-500/20 text-amber-400' : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
-                    }`}>
-                      <AlertTriangle size={24} />
-                    </div>
-                  </div>
-                </div>
-
-                {/* KPI GRID */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <MetricCard 
-                    label="Extraction Stage" 
-                    value={activeDistrict.metrics.stage.toFixed(1)} 
-                    unit="%" 
-                    icon={Activity} 
-                    color={activeDistrict.metrics.stage > 90 ? 'bg-red-500' : 'bg-blue-500'} 
-                    subtext={activeDistrict.metrics.stage > 100 ? "Over-Exploited" : "Sustainable Limit"}
-                  />
-                  <MetricCard 
-                    label="Annual Recharge" 
-                    value={(activeDistrict.metrics.recharge / 1000).toFixed(1)} 
-                    unit="k Ham" 
-                    icon={Droplet} 
-                    color="bg-emerald-500" 
-                  />
-                  <MetricCard 
-                    label="Rainfall" 
-                    value={activeDistrict.metrics.rainfall || "N/A"} 
-                    unit="mm" 
-                    icon={Wind} 
-                    color="bg-cyan-500" 
-                  />
-                  <MetricCard 
-                    label="Irrigation Usage" 
-                    value={(activeDistrict.metrics.extraction_irrigation / 1000).toFixed(1)} 
-                    unit="k Ham" 
-                    icon={ThermometerSun} 
-                    color="bg-amber-500" 
-                  />
-                </div>
-
-                {/* CHARTS ROW */}
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  
-                  {/* BAR CHART */}
-                  <div className="lg:col-span-2 bg-[#14161c] border border-white/5 rounded-2xl p-6">
-                    <h3 className="text-white text-sm font-bold mb-6 flex items-center gap-2">
-                      <BarChart3 size={16} className="text-blue-500" />
-                      Supply vs. Demand Analysis
-                    </h3>
-                    <div className="h-64 w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart
-                          data={[
-                            { name: 'Total Recharge', value: activeDistrict.metrics.recharge },
-                            { name: 'Irrigation Ext.', value: activeDistrict.metrics.extraction_irrigation },
-                            { name: 'Domestic Ext.', value: activeDistrict.metrics.extraction_domestic },
-                          ]}
-                          margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
-                          barSize={40}
-                        >
-                          <XAxis dataKey="name" stroke="#475569" fontSize={10} tickLine={false} axisLine={false} />
-                          <YAxis stroke="#475569" fontSize={10} tickFormatter={(val) => `${(val/1000).toFixed(0)}k`} tickLine={false} axisLine={false} />
-                          <Tooltip 
-                            cursor={{fill: 'transparent'}}
-                            contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)' }}
-                            itemStyle={{ color: '#fff', fontSize: '12px' }}
-                          />
-                          <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-                            {
-                              [0, 1, 2].map((index) => (
-                                <Cell key={`cell-${index}`} fill={['#10B981', '#F59E0B', '#3B82F6'][index]} />
-                              ))
-                            }
-                          </Bar>
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
-
-                  {/* PIE CHART */}
-                  <div className="bg-[#14161c] border border-white/5 rounded-2xl p-6 flex flex-col">
-                    <h3 className="text-white text-sm font-bold mb-6">Extraction Split</h3>
-                    <div className="flex-1 relative">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <PieChart>
-                                <Pie
-                                    data={[
-                                        { name: 'Irrigation', value: activeDistrict.metrics.extraction_irrigation, fill: '#F59E0B' },
-                                        { name: 'Domestic', value: activeDistrict.metrics.extraction_domestic, fill: '#3B82F6' },
-                                    ]}
-                                    cx="50%"
-                                    cy="50%"
-                                    innerRadius={60}
-                                    outerRadius={80}
-                                    paddingAngle={5}
-                                    dataKey="value"
-                                    stroke="none"
-                                >
-                                </Pie>
-                                <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px' }} itemStyle={{ color: '#fff' }} />
-                            </PieChart>
-                        </ResponsiveContainer>
-                        <div className="absolute inset-0 flex items-center justify-center flex-col pointer-events-none">
-                            <span className="text-2xl font-bold text-white">
-                                {((activeDistrict.metrics.extraction_irrigation / (activeDistrict.metrics.extraction_irrigation + activeDistrict.metrics.extraction_domestic)) * 100).toFixed(0)}%
-                            </span>
-                            <span className="text-[10px] text-slate-500 uppercase tracking-widest">Irrigation</span>
-                        </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* AI INSIGHT SECTION */}
-                <div className="bg-gradient-to-r from-blue-900/10 to-purple-900/10 border border-blue-500/10 rounded-2xl p-1">
-                    <div className="bg-[#0e1014] rounded-xl p-6">
-                        <div className="flex items-center justify-between mb-4">
-                            <h3 className="text-white font-bold flex items-center gap-2">
-                                <BrainCircuit size={18} className="text-purple-500" />
-                                AI Strategic Assessment
-                            </h3>
-                            <button 
-                                onClick={() => generateInsight(activeDistrict)}
-                                disabled={insightLoading}
-                                className="text-xs bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg text-slate-300 transition-colors disabled:opacity-50"
-                            >
-                                {insightLoading ? 'Analyzing...' : 'Refresh Analysis'}
-                            </button>
-                        </div>
-                        
-                        <div className="min-h-[100px] text-sm text-slate-400 leading-relaxed font-light">
-                            {insightLoading ? (
-                                <div className="space-y-2 animate-pulse">
-                                    <div className="h-2 bg-white/5 rounded w-3/4"></div>
-                                    <div className="h-2 bg-white/5 rounded w-full"></div>
-                                    <div className="h-2 bg-white/5 rounded w-5/6"></div>
-                                </div>
-                            ) : (
-                                aiInsight ? (
-                                    <div className="prose prose-invert prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: aiInsight }} />
-                                ) : (
-                                    <div className="flex flex-col items-center justify-center h-24 text-slate-600">
-                                        <p>Click "Refresh Analysis" to generate an AI report for {activeDistrict.name}.</p>
-                                    </div>
-                                )
-                            )}
-                        </div>
-                    </div>
-                </div>
-
-              </motion.div>
-            ) : (
-              /* EMPTY STATE */
-              <div className="h-full flex flex-col items-center justify-center text-center opacity-30">
-                <LayoutGrid size={64} className="mb-6 text-slate-500" />
-                <h3 className="text-xl font-bold text-white">Select a District</h3>
-                <p className="text-slate-500 max-w-sm mt-2 text-sm">Choose a region from the menu on the left to view real-time hydro-spatial risk analytics.</p>
-              </div>
-            )}
-          </AnimatePresence>
-        </div>
-
+      </div>
+      <div className="p-3 rounded-xl border" style={{ background: c.bg, border: `1px solid ${c.border}`, color: c.icon }}>
+        <Icon size={18} />
       </div>
     </div>
   );

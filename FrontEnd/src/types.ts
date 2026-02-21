@@ -1,37 +1,37 @@
-export interface WaterData {
-  state: string;
-  district: string;
-  waterLevel: number;
-  temperature: number;
-  riskLevel: 'Low' | 'Medium' | 'High' | 'Critical';
-  quality: {
-    ph: number;
-    tds: number;
-    hardness: number;
-  };
+export interface DistrictMetrics {
+  stage: number;
+  rainfall: number;
+  recharge: number;
+  extraction_irrigation: number;
+  extraction_domestic: number;
+}
+
+export interface District {
+  id: string;
+  name: string;
+  status: string; // 'Critical', 'Safe', 'Semi-Critical' etc
+  risk: 'High' | 'Medium' | 'Low';
+  metrics: DistrictMetrics;
 }
 
 export interface StateData {
   name: string;
-  districts: DistrictData[];
-  averageWaterLevel: number;
-  riskLevel: 'Low' | 'Medium' | 'High' | 'Critical';
+  risk: 'High' | 'Medium' | 'Low';
+  avg_extraction: number;
+  districts: District[];
 }
 
-export interface DistrictData {
-  name: string;
-  waterLevel: number;
-  temperature: number;
-  riskLevel: 'Low' | 'Medium' | 'High' | 'Critical';
-  coordinates: {
-    lat: number;
-    lng: number;
-  };
-}
+export interface RiskHierarchy extends Array<StateData> { }
 
 export interface ChatMessage {
   id: string;
   text: string;
-  sender: 'user' | 'bot';
-  timestamp: Date;
+  isBot: boolean;
+  timestamp: number;
+  isStreaming?: boolean;
+}
+
+// For the /api/data endpoint which returns a flat object of metrics
+export interface LocationMetrics {
+  [key: string]: number;
 }

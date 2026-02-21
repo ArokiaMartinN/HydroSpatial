@@ -432,6 +432,66 @@ def get_data():
     return jsonify(result), 200
 
 
+import sqlite3
+import datetime
+
+# ----------------- Database Setup -----------------
+DB_FILE = "chat_history.db"
+
+def init_db():
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute('''CREATE TABLE IF NOT EXISTS history 
+                     (id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                      query TEXT, 
+                      answer TEXT, 
+                      timestamp TEXT)''')
+        conn.commit()
+        conn.close()
+        print("✅ Database Initialized.")
+    except Exception as e:
+        print(f"❌ Database Init Error: {e}")
+
+init_db()
+
+# ----------------- History Endpoints -----------------
+
+@app.route("/api/history", methods=["GET"])
+def get_history():
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute("SELECT query, answer, timestamp FROM history ORDER BY id DESC LIMIT 50")
+        rows = c.fetchall()
+        conn.close()
+        
+        history = [{"query": r[0], "answer": r[1], "time": r[2]} for r in rows]
+        return jsonify(history), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/history", methods=["POST"])
+def save_history():
+    try:
+        data = request.json
+        query = data.get("query")
+        answer = data.get("answer")
+        timestamp = datetime.datetime.now().strftime("%I:%M %p")
+        
+        if not query or not answer:
+            return jsonify({"error": "Missing fields"}), 400
+
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute("INSERT INTO history (query, answer, timestamp) VALUES (?, ?, ?)", (query, answer, timestamp))
+        conn.commit()
+        conn.close()
+        return jsonify({"status": "saved"}), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/query", methods=["POST"])
 def query_ai():
     data = request.json or {}
@@ -468,6 +528,9 @@ When answering:
 - Give 2–3 actionable insights or steps, based on the data when possible
 - If data is missing or not clear, say that honestly instead of guessing
 - End with a short motivational or engaging line (like “💧 Let’s keep our groundwater safe together!”)
+- Don't mention that in the answer, from the dataset given data is used to answer the question, answer the question 
+- Use the metric units provided in the data, if the user asks that are not in the dataset try to find it from the internet but only if it is related to water 
+- if questions are out of scope politely refuse to answer and suggest to ask water related questions only
 
 User Question:
 {user_query}

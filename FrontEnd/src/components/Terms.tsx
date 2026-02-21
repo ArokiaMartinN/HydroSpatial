@@ -1,292 +1,236 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
+import { FileText, Shield, Scale, Clock, CheckCircle, Download } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { FileText, Shield, Lock, AlertCircle, RefreshCw, ChevronRight, CheckCircle2 } from 'lucide-react';
-import { ThemeContext } from '../App';
 
-const TermsAndConditions: React.FC = () => {
-  const { themeColors } = React.useContext(ThemeContext);
-  const [activeSection, setActiveSection] = useState<string>('intro');
-
-  // Configuration
-  const sections = [
-    { id: 'intro', title: 'Introduction', icon: <FileText size={18} /> },
-    { id: 'data-usage', title: 'Data Usage', icon: <Shield size={18} /> },
-    { id: 'privacy', title: 'Privacy & Security', icon: <Lock size={18} /> },
-    { id: 'disclaimer', title: 'Disclaimer', icon: <AlertCircle size={18} /> },
-    { id: 'updates', title: 'Updates', icon: <RefreshCw size={18} /> },
-  ];
-
-  // --- SCROLL SPY LOGIC ---
-  useEffect(() => {
-    const handleScroll = () => {
-      const scrollY = window.scrollY;
-      const windowHeight = window.innerHeight;
-      const documentHeight = document.documentElement.scrollHeight;
-
-      if (scrollY + windowHeight >= documentHeight - 50) {
-        setActiveSection('updates');
-        return;
-      }
-
-      if (scrollY < 100) {
-        setActiveSection('intro');
-        return;
-      }
-
-      const triggerPoint = scrollY + 200;
-
-      for (const section of sections) {
-        const element = document.getElementById(section.id);
-        if (element) {
-          const offsetTop = element.offsetTop;
-          const offsetBottom = offsetTop + element.offsetHeight;
-
-          if (triggerPoint >= offsetTop && triggerPoint < offsetBottom) {
-            setActiveSection(section.id);
-          }
-        }
-      }
-    };
-
-    window.addEventListener('scroll', handleScroll);
-    handleScroll();
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
-
-  const scrollToSection = (id: string) => {
-    const element = document.getElementById(id);
-    if (element) {
-      const offset = 100;
-      const bodyRect = document.body.getBoundingClientRect().top;
-      const elementRect = element.getBoundingClientRect().top;
-      const elementPosition = elementRect - bodyRect;
-      const offsetPosition = elementPosition - offset;
-
-      window.scrollTo({
-        top: offsetPosition,
-        behavior: 'smooth'
-      });
-    }
-  };
-
-  const fadeInUp = {
-    hidden: { opacity: 0, y: 20 },
-    visible: { opacity: 1, y: 0, transition: { duration: 0.5 } }
-  };
+const Terms = () => {
+  const handlePrint = () => window.print();
 
   return (
-    <div className="relative w-full min-h-screen">
-      
-      {/* FIXED BACKGROUND LAYER */}
-      <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-0 left-0 w-full h-96 bg-gradient-to-b from-blue-50/50 to-transparent dark:from-blue-900/20" />
-        <div className="absolute top-20 left-[-100px] w-96 h-96 bg-blue-400/10 rounded-full blur-3xl" />
-        <div className="absolute bottom-20 right-[-100px] w-96 h-96 bg-purple-400/10 rounded-full blur-3xl" />
+    <div className="max-w-5xl mx-auto p-8 lg:p-12 animate-fade-in">
+
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-end justify-between mb-10 gap-6">
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <span className="badge badge-primary">Legal Document</span>
+            <span className="text-xs font-mono" style={{ color: 'var(--text-tertiary)' }}>REF-2025-HS-TOS</span>
+          </div>
+          <h1 className="text-4xl font-extrabold tracking-tight mb-2"
+            style={{ color: 'var(--text-main)', fontFamily: 'Plus Jakarta Sans' }}>
+            Terms of Service
+          </h1>
+          <div className="flex items-center gap-4 text-sm" style={{ color: 'var(--text-secondary)' }}>
+            <div className="flex items-center gap-1.5">
+              <Clock size={13} />
+              <span>Last updated: December 19, 2025</span>
+            </div>
+            <div className="w-1 h-1 rounded-full" style={{ background: 'var(--border-strong)' }} />
+            <div className="flex items-center gap-1.5">
+              <Shield size={13} />
+              <span>Enterprise Edition</span>
+            </div>
+          </div>
+        </div>
+        <div className="flex gap-3">
+          <button onClick={handlePrint} className="btn-tech-ghost text-sm">
+            <Download size={15} /> Download PDF
+          </button>
+          <button className="btn-tech-primary text-sm">
+            Accept & Continue
+          </button>
+        </div>
       </div>
 
-      {/* Added px-4 for mobile padding */}
-      <div className="max-w-7xl mx-auto pt-8 px-4 md:px-6 pb-24 relative z-10">
-        
-        <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-12">
-          
-          {/* --- LEFT SIDEBAR (Hidden on Mobile) --- */}
-          <div className="hidden lg:block">
-             <div className="sticky top-24">
-                <motion.div 
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  className={`p-4 rounded-2xl backdrop-blur-md border ${themeColors.border} shadow-lg bg-white/80 dark:bg-gray-900/80`}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+
+        {/* TOC Sidebar */}
+        <div className="hidden lg:block lg:col-span-3">
+          <div className="sticky top-8">
+            <h4 className="font-bold text-xs uppercase tracking-widest mb-4 pl-1"
+              style={{ color: 'var(--text-tertiary)' }}>
+              Contents
+            </h4>
+            <nav className="space-y-1">
+              {['Acceptance', 'Data Usage', 'Intellectual Property', 'Liability', 'Termination'].map(item => (
+                <a
+                  key={item}
+                  href={`#${item.toLowerCase().replace(' ', '-')}`}
+                  className="block px-3 py-2 text-sm rounded-xl transition-all font-medium"
+                  style={{ color: 'var(--text-tertiary)' }}
+                  onMouseEnter={e => {
+                    (e.currentTarget as HTMLElement).style.background = 'var(--bg-hover)';
+                    (e.currentTarget as HTMLElement).style.color = 'var(--primary)';
+                  }}
+                  onMouseLeave={e => {
+                    (e.currentTarget as HTMLElement).style.background = 'transparent';
+                    (e.currentTarget as HTMLElement).style.color = 'var(--text-tertiary)';
+                  }}
                 >
-                  <h3 className={`text-xs font-bold uppercase tracking-wider mb-4 px-4 ${themeColors.textSecondary}`}>
-                    Table of Contents
-                  </h3>
-                  <ul className="space-y-1">
-                    {sections.map((section) => {
-                      const isActive = activeSection === section.id;
-                      return (
-                        <li key={section.id} className="relative">
-                          <button
-                            onClick={() => scrollToSection(section.id)}
-                            className={`relative w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-xl transition-all duration-300 z-10 ${
-                              isActive 
-                                ? 'text-blue-600 dark:text-blue-400' 
-                                : `${themeColors.textSecondary} hover:${themeColors.textPrimary}`
-                            }`}
-                          >
-                            {isActive && (
-                              <motion.div
-                                layoutId="active-pill"
-                                className="absolute inset-0 bg-blue-50 dark:bg-blue-900/30 rounded-xl border border-blue-100 dark:border-blue-800"
-                                transition={{ type: "spring", stiffness: 300, damping: 30 }}
-                              />
-                            )}
-                            
-                            <span className="relative z-10">{section.icon}</span>
-                            <span className="relative z-10">{section.title}</span>
-                            
-                            {isActive && (
-                              <motion.div
-                                initial={{ opacity: 0, scale: 0 }}
-                                animate={{ opacity: 1, scale: 1 }}
-                                className="absolute right-3 text-blue-500 z-10"
-                              >
-                                <ChevronRight size={14} />
-                              </motion.div>
-                            )}
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </motion.div>
-             </div>
-          </div>
+                  {item}
+                </a>
+              ))}
+            </nav>
 
-          {/* --- RIGHT CONTENT --- */}
-          <div className="space-y-12 md:space-y-16 min-h-screen"> 
-            
-            {/* Header / Intro */}
-            <motion.section 
-              id="intro" 
-              initial="hidden" 
-              animate="visible" 
-              variants={fadeInUp}
-              className="scroll-mt-24"
-            >
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-xs font-semibold tracking-wide mb-4">
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
-                </span>
-                LEGALLY BINDING
-              </div>
-              
-              <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight mb-4">
-                <span className="bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-purple-600 dark:from-blue-400 dark:to-purple-400">
-                  Terms & Conditions
-                </span>
-              </h1>
-              <p className={`text-base md:text-lg ${themeColors.textSecondary} max-w-2xl leading-relaxed`}>
-                Please read these terms carefully before using our HydroSpatial platform. 
-                Last updated: <span className="font-semibold text-blue-600 dark:text-blue-400">{new Date().toLocaleDateString()}</span>
+            <div className="mt-8 p-4 rounded-2xl border"
+              style={{ background: 'var(--gradient-soft)', border: '1px solid var(--border-main)' }}>
+              <h5 className="font-bold text-sm mb-2" style={{ color: 'var(--text-main)' }}>Need Help?</h5>
+              <p className="text-xs mb-3" style={{ color: 'var(--text-secondary)' }}>
+                Contact our legal team for clarifications.
               </p>
-            </motion.section>
+              <a href="mailto:legal@hydrospatial.com" className="text-xs font-bold"
+                style={{ color: 'var(--primary)' }}>
+                legal@hydrospatial.com
+              </a>
+            </div>
+          </div>
+        </div>
 
-            <hr className="border-gray-200 dark:border-gray-800" />
+        {/* Main Content */}
+        <div className="lg:col-span-9 space-y-6">
 
-            {/* Data Usage */}
-            <motion.section 
-              id="data-usage" 
-              initial="hidden" 
-              whileInView="visible"
-              viewport={{ once: true, margin: "-50px" }}
-              variants={fadeInUp}
-              className="scroll-mt-24"
-            >
-              <div className="flex flex-col md:flex-row items-start gap-4">
-                <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400">
-                  <Shield size={28} strokeWidth={1.5} />
-                </div>
-                <div className="space-y-4 w-full">
-                   <h2 className={`text-xl md:text-2xl font-bold ${themeColors.textPrimary}`}>Data Usage Policy</h2>
-                   <p className={`${themeColors.textSecondary} leading-relaxed text-sm md:text-base`}>
-                     The water resource data provided through HydroSpatial India is intended for informational purposes only. By accessing our data, you agree to the following strict usage guidelines:
-                   </p>
-                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4 mt-4">
-                     {['Responsible Usage', 'No Redistribution', 'Source Attribution', 'Report Inaccuracies'].map((item, i) => (
-                       <div key={i} className={`flex items-center gap-3 p-3 md:p-4 rounded-lg border ${themeColors.border} hover:border-blue-300 transition-colors bg-white dark:bg-gray-900/50`}>
-                         <CheckCircle2 size={18} className="text-green-500 flex-shrink-0" />
-                         <span className={`font-medium text-sm md:text-base ${themeColors.textPrimary}`}>{item}</span>
-                       </div>
-                     ))}
-                   </div>
-                </div>
+          {/* Section 1 */}
+          <motion.section
+            id="acceptance"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="p-8 rounded-2xl border"
+            style={{ background: 'white', border: '1px solid var(--border-main)', boxShadow: 'var(--shadow-sm)' }}
+          >
+            <div className="flex items-start gap-4">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+                style={{ background: 'var(--primary-light)', color: 'var(--primary)', border: '1px solid var(--border-main)' }}>
+                <FileText size={18} />
               </div>
-            </motion.section>
-
-            {/* Privacy */}
-            <motion.section 
-              id="privacy" 
-              initial="hidden" 
-              whileInView="visible"
-              viewport={{ once: true, margin: "-50px" }}
-              variants={fadeInUp}
-              className="scroll-mt-24"
-            >
-               <div className="flex flex-col md:flex-row items-start gap-4">
-                <div className="p-3 rounded-xl bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400">
-                  <Lock size={28} strokeWidth={1.5} />
-                </div>
-                <div className="space-y-4 w-full">
-                  <h2 className={`text-xl md:text-2xl font-bold ${themeColors.textPrimary}`}>Privacy & Security</h2>
-                  <p className={`${themeColors.textSecondary} leading-relaxed text-sm md:text-base`}>
-                    We utilize industry-standard encryption (AES-256) to protect your personal information. We maintain a strict policy of transparency regarding data collection.
+              <div>
+                <h2 className="text-xl font-bold mb-4" style={{ color: 'var(--text-main)', fontFamily: 'Plus Jakarta Sans' }}>
+                  1. Acceptance of Terms
+                </h2>
+                <div className="space-y-4 text-[0.95rem] leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+                  <p>
+                    By accessing and using the HydroSpatial Insight Platform ("The Service"), you accept and agree to be bound by
+                    the terms and provision of this agreement. In addition, when using these particular services, you shall be
+                    subject to any posted guidelines or rules applicable to such services.
                   </p>
-                  <ul className="space-y-3 pl-1 mt-2 text-sm md:text-base">
-                    <li className="flex items-center gap-3">
-                      <span className="w-1.5 h-1.5 rounded-full bg-purple-500"></span>
-                      <span className={themeColors.textSecondary}>No data sharing with third-parties without explicit consent.</span>
-                    </li>
-                    <li className="flex items-center gap-3">
-                      <span className="w-1.5 h-1.5 rounded-full bg-purple-500"></span>
-                      <span className={themeColors.textSecondary}>Regular vulnerability assessments and security audits.</span>
-                    </li>
-                  </ul>
+                  <p>
+                    If you are entering into this Agreement on behalf of a company or other legal entity, you represent that you
+                    have the authority to bind such entity to these terms and conditions, in which case the terms "you" or "your"
+                    shall refer to such entity.
+                  </p>
                 </div>
               </div>
-            </motion.section>
+            </div>
+          </motion.section>
 
-            {/* Disclaimer */}
-            <motion.section 
-              id="disclaimer" 
-              initial="hidden" 
-              whileInView="visible"
-              viewport={{ once: true, margin: "-50px" }}
-              variants={fadeInUp}
-              className="scroll-mt-24"
-            >
-               <div className="flex flex-col md:flex-row items-start gap-4">
-                <div className="p-3 rounded-xl bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400">
-                  <AlertCircle size={28} strokeWidth={1.5} />
+          {/* Section 2 */}
+          <motion.section
+            id="data-usage"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.15 }}
+            className="p-8 rounded-2xl border"
+            style={{ background: 'white', border: '1px solid var(--border-main)', boxShadow: 'var(--shadow-sm)' }}
+          >
+            <div className="flex items-start gap-4">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+                style={{ background: '#ede9fe', color: '#7c3aed', border: '1px solid #c4b5fd' }}>
+                <Scale size={18} />
+              </div>
+              <div className="flex-1">
+                <h2 className="text-xl font-bold mb-4" style={{ color: 'var(--text-main)', fontFamily: 'Plus Jakarta Sans' }}>
+                  2. Data Usage & Privacy
+                </h2>
+                <p className="text-[0.95rem] leading-relaxed mb-6" style={{ color: 'var(--text-secondary)' }}>
+                  All hydrological data processed through our neural engines is treated as rigorous scientific output. We adhere
+                  to strict data governance protocols to ensure the integrity and confidentiality of your data.
+                </p>
+                <div className="grid sm:grid-cols-2 gap-4">
+                  {[
+                    {
+                      title: 'Data Security', icon: Shield, color: '#22c55e', bg: '#f0fdf4', border: '#bbf7d0',
+                      items: ['AES-256 encryption at rest', 'TLS 1.3 encryption in transit'],
+                    },
+                    {
+                      title: 'Compliance', icon: CheckCircle, color: 'var(--primary)', bg: 'var(--bg-subtle)', border: 'var(--border-main)',
+                      items: ['GDPR & CCPA Compliant', 'ISO 27001 Certified Datacenters'],
+                    },
+                  ].map(card => (
+                    <div key={card.title} className="p-4 rounded-xl border"
+                      style={{ background: card.bg, border: `1px solid ${card.border}` }}>
+                      <h4 className="font-semibold text-sm mb-3 flex items-center gap-2" style={{ color: 'var(--text-main)' }}>
+                        <card.icon size={15} style={{ color: card.color }} />
+                        {card.title}
+                      </h4>
+                      <ul className="space-y-2">
+                        {card.items.map(item => (
+                          <li key={item} className="flex items-start gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
+                            <CheckCircle size={13} className="mt-0.5 shrink-0" style={{ color: card.color }} />
+                            <span>{item}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
                 </div>
-                <div className="space-y-4 w-full">
-                  <h2 className={`text-xl md:text-2xl font-bold ${themeColors.textPrimary}`}>Disclaimer</h2>
-                  <div className={`p-4 md:p-6 rounded-xl bg-orange-50/50 dark:bg-orange-900/10 border border-orange-100 dark:border-orange-900/30`}>
-                    <p className={`${themeColors.textSecondary} leading-relaxed italic text-sm md:text-base`}>
-                      "While we strive to maintain accurate and up-to-date information, HydroSpatial India makes no warranties about the completeness, reliability, or accuracy of the data. Users acknowledge that any reliance on the information is at their own risk."
-                    </p>
+              </div>
+            </div>
+          </motion.section>
+
+          {/* Section 3 */}
+          <motion.section
+            id="intellectual-property"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+            className="p-8 rounded-2xl border"
+            style={{ background: 'white', border: '1px solid var(--border-main)', boxShadow: 'var(--shadow-sm)' }}
+          >
+            <div className="flex items-start gap-4">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+                style={{ background: '#fff7ed', color: '#ea580c', border: '1px solid #fed7aa' }}>
+                <FileText size={18} />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold mb-4" style={{ color: 'var(--text-main)', fontFamily: 'Plus Jakarta Sans' }}>
+                  3. Intellectual Property
+                </h2>
+                <div className="space-y-4 text-[0.95rem] leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+                  <p>
+                    The Service and its original content (excluding Content provided by users), features, and functionality are
+                    and will remain the exclusive property of HydroSpatial Intelligence Ltd. and its licensors.
+                  </p>
+                  <div className="p-4 rounded-xl text-sm"
+                    style={{ background: 'var(--primary-light)', border: '1px solid var(--border-main)', color: 'var(--primary)' }}>
+                    <strong>Note:</strong> You retain all rights to the raw hydrological data you upload to the platform. We
+                    claim no ownership over your source data.
                   </div>
                 </div>
               </div>
-            </motion.section>
+            </div>
+          </motion.section>
 
-            {/* Updates */}
-            <motion.section 
-              id="updates" 
-              initial="hidden" 
-              whileInView="visible"
-              viewport={{ once: true, margin: "-50px" }}
-              variants={fadeInUp}
-              className="scroll-mt-24"
-            >
-               <div className="flex flex-col md:flex-row items-start gap-4">
-                <div className="p-3 rounded-xl bg-teal-50 dark:bg-teal-900/20 text-teal-600 dark:text-teal-400">
-                  <RefreshCw size={28} strokeWidth={1.5} />
-                </div>
-                <div className="space-y-4 w-full">
-                  <h2 className={`text-xl md:text-2xl font-bold ${themeColors.textPrimary}`}>Updates to Terms</h2>
-                  <p className={`${themeColors.textSecondary} leading-relaxed text-sm md:text-base`}>
-                    These terms may be updated periodically. We will notify you of significant changes via email. Continued use of the platform constitutes acceptance of the updated terms.
-                  </p>
-                </div>
-              </div>
-            </motion.section>
+        </div>
+      </div>
 
-          </div>
+      {/* Footer */}
+      <div className="mt-16 pt-8 text-center" style={{ borderTop: '1px solid var(--border-main)' }}>
+        <p className="text-sm mb-3" style={{ color: 'var(--text-secondary)' }}>
+          © 2025 HydroSpatial Intelligence Ltd. All rights reserved.
+        </p>
+        <div className="flex justify-center gap-6 text-sm">
+          {['Privacy Policy', 'Cookie Policy', 'SLA'].map(link => (
+            <a key={link} href="#"
+              className="transition-colors font-medium"
+              style={{ color: 'var(--text-tertiary)' }}
+              onMouseEnter={e => (e.currentTarget.style.color = 'var(--primary)')}
+              onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-tertiary)')}>
+              {link}
+            </a>
+          ))}
         </div>
       </div>
     </div>
   );
 };
 
-export default TermsAndConditions;
+export default Terms;
